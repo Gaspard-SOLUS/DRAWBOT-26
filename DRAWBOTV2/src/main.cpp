@@ -3,61 +3,15 @@
 #include "include/moteurs.h"
 #include "include/encodeurs.h"
 #include "include/robot.h"
+#include "include/avance.h"
 
-enum RobotState {
-  AVANCE,
-  RECULE,
-  STOP
-};
-
-RobotState state = AVANCE;
-unsigned long stateStartTime = 0;
-
-// LED de vie
 unsigned long lastBlinkTime = 0;
 bool ledState = false;
-
-// Affichage série périodique
 unsigned long lastEncoderUpdateTime = 0;
 unsigned long lastPrintTime = 0;
 
-void updateSequence(unsigned long now) {
-  switch (state) {
-    case AVANCE:
-      setMotors(200, 200);
+bool commandStarted = false;
 
-      if (now - stateStartTime >= 2000) {
-        state = RECULE;
-        stateStartTime = now;
-        Serial.println("Transition -> RECULE");
-      }
-      break;
-
-    case RECULE:
-      setMotors(-200, -200);
-
-      if (now - stateStartTime >= 2000) {
-        state = STOP;
-        stateStartTime = now;
-        Serial.println("Transition -> STOP");
-      }
-      break;
-
-    case STOP:
-      stopMotors();
-      // brakeMotors();
-
-      if (now - stateStartTime >= 2000) {
-        state = AVANCE;
-        stateStartTime = now;
-        resetEncoders();
-        Serial.println("Transition -> AVANCE");
-      }
-      break;
-  }
-}
-
-// LED de vie
 void updateHeartbeat(unsigned long now) {
   if (now - lastBlinkTime >= 500) {
     lastBlinkTime = now;
@@ -66,15 +20,14 @@ void updateHeartbeat(unsigned long now) {
   }
 }
 
-// Mise à jour des encoreurs
 void updateEncoderTask(unsigned long now) {
-  if (now - lastEncoderUpdateTime >= 50) {
+  if (now - lastEncoderUpdateTime >= 20) {
     lastEncoderUpdateTime = now;
     updateEncoderMeasurements(now);
   }
 }
 
-void printEncoders(unsigned long now) {
+void printTelemetry(unsigned long now) {
   if (now - lastPrintTime >= 200) {
     lastPrintTime = now;
 
@@ -83,11 +36,7 @@ void printEncoders(unsigned long now) {
     Serial.print(" | R ticks = ");
     Serial.print(getRightEncoderTicks());
 
-    Serial.print(" || L dist(cm) = ");
-    Serial.print(getLeftDistanceCm(), 2);
-    Serial.print(" | R dist(cm) = ");
-    Serial.print(getRightDistanceCm(), 2);
-    Serial.print(" | Avg dist(cm) = ");
+    Serial.print(" || Avg dist(cm) = ");
     Serial.print(getAverageDistanceCm(), 2);
 
     Serial.print(" || L speed(cm/s) = ");
@@ -97,41 +46,46 @@ void printEncoders(unsigned long now) {
   }
 }
 
-// ==================================================
-// ===================== SETUP ======================
-// ==================================================
 void setup() {
   Serial.begin(115200);
 
   pinMode(LEDU1, OUTPUT);
   pinMode(LEDU2, OUTPUT);
 
-  digitalWrite(LEDU1, LOW);
-  digitalWrite(LEDU2, LOW);
-
   initMotors();
   initEncoders();
   resetEncoders();
 
-  stateStartTime = millis();
   lastBlinkTime = millis();
   lastEncoderUpdateTime = millis();
   lastPrintTime = millis();
 
-  Serial.println("Robot initialise");
+  delay(1000);
+
+  Serial.println("Test avance distance");
 }
 
-// ==================================================
-// ===================== LOOP= ======================
-// ==================================================
 void loop() {
   unsigned long now = millis();
 
-  updateSequence(now);
   updateHeartbeat(now);
   updateEncoderTask(now);
-  printEncoders(now);
 
-  // updatePid();
-  // sendTelemetry();
+  if (!commandStarted) {
+    startAvanceForwardDistance(20.0f, 180, 90, 2.5f);
+    commandStarted = true;
+    Serial.println("Demarrage avance 20 cm");
+  }
+
+  updateAvance();
+  printTelemetry(now);
+
+  if (commandStarted && isAvanceTermine()) {
+    Serial.println("Deplacement termine");
+    while (true) {
+      stopMotors();
+      //brakeMotors();
+      updateHeartbeat(millis());
+    }
+  }
 }
