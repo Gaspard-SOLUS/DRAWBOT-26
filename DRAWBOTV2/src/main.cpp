@@ -2,16 +2,17 @@
 #include "include/pins.h"
 #include "include/moteurs.h"
 #include "include/encodeurs.h"
-#include "include/robot.h"
-#include "include/avance.h"
+#include "include/pid_vitesse.h"
+#include "include/wifi_param.h"
 
 unsigned long lastBlinkTime = 0;
 bool ledState = false;
-unsigned long lastEncoderUpdateTime = 0;
+
+unsigned long lastControlTime = 0;
+unsigned long lastWifiTime = 0;
 unsigned long lastPrintTime = 0;
 
-bool commandStarted = false;
-
+// LED de vie
 void updateHeartbeat(unsigned long now) {
   if (now - lastBlinkTime >= 500) {
     lastBlinkTime = now;
@@ -20,32 +21,62 @@ void updateHeartbeat(unsigned long now) {
   }
 }
 
-void updateEncoderTask(unsigned long now) {
-  if (now - lastEncoderUpdateTime >= 20) {
-    lastEncoderUpdateTime = now;
+// ==========================================
+// Boucle de contrôle à 20 ms
+// ==========================================
+void updateControlTask(unsigned long now) {
+  if (now - lastControlTime >= 20) {
+    float dtSec = (now - lastControlTime) / 1000.0f;
+    lastControlTime = now;
+
     updateEncoderMeasurements(now);
+    updatePidVitesse(dtSec);
   }
 }
 
-void printTelemetry(unsigned long now) {
+// ==========================================
+// Envoi Teleplot à 50 ms
+// ==========================================
+void updateWifiTelemetryTask(unsigned long now) {
+  if (now - lastWifiTime >= 50) {
+    lastWifiTime = now;
+    wifiSendTelemetry();
+    wifiSendToGUI();
+  }
+}
+
+// ==========================================
+// Affichage série à 200 ms
+// ==========================================
+void updateSerialPrintTask(unsigned long now) {
   if (now - lastPrintTime >= 200) {
     lastPrintTime = now;
 
-    Serial.print("L ticks = ");
-    Serial.print(getLeftEncoderTicks());
-    Serial.print(" | R ticks = ");
-    Serial.print(getRightEncoderTicks());
+    Serial.print("targetL=");
+    Serial.print(getLeftTargetSpeedCmPerSec(), 2);
+    Serial.print(" targetR=");
+    Serial.print(getRightTargetSpeedCmPerSec(), 2);
 
-    Serial.print(" || Avg dist(cm) = ");
-    Serial.print(getAverageDistanceCm(), 2);
-
-    Serial.print(" || L speed(cm/s) = ");
+    Serial.print(" | speedL=");
     Serial.print(getLeftSpeedCmParSec(), 2);
-    Serial.print(" | R speed(cm/s) = ");
-    Serial.println(getRightSpeedCmParSec(), 2);
+    Serial.print(" speedR=");
+    Serial.print(getRightSpeedCmParSec(), 2);
+
+    Serial.print(" | errL=");
+    Serial.print(getLeftPidError(), 2);
+    Serial.print(" errR=");
+    Serial.print(getRightPidError(), 2);
+
+    Serial.print(" | outL=");
+    Serial.print(getLeftPidOutput(), 2);
+    Serial.print(" outR=");
+    Serial.println(getRightPidOutput(), 2);
   }
 }
 
+// ==========================================
+// Setup
+// ==========================================
 void setup() {
   Serial.begin(115200);
 
@@ -54,38 +85,33 @@ void setup() {
 
   initMotors();
   initEncoders();
+  initPidVitesse();
   resetEncoders();
 
-  lastBlinkTime = millis();
-  lastEncoderUpdateTime = millis();
-  lastPrintTime = millis();
+  wifiInit();
+
+  unsigned long now = millis();
+  lastBlinkTime = now;
+  lastControlTime = now;
+  lastWifiTime = now;
+  lastPrintTime = now;
+
+  setSpeedTargetsCmPerSec(0.0f, 0.0f);
 
   delay(1000);
-
-  Serial.println("Test avance distance");
+  Serial.println("Test avec GUI");
 }
 
+// ==========================================
+// Loop
+// ==========================================
 void loop() {
   unsigned long now = millis();
 
   updateHeartbeat(now);
-  updateEncoderTask(now);
+  wifiHandleClient();
 
-  if (!commandStarted) {
-    startAvanceForwardDistance(20.0f, 180, 90, 2.5f);
-    commandStarted = true;
-    Serial.println("Demarrage avance 20 cm");
-  }
-
-  updateAvance();
-  printTelemetry(now);
-
-  if (commandStarted && isAvanceTermine()) {
-    Serial.println("Deplacement termine");
-    while (true) {
-      stopMotors();
-      //brakeMotors();
-      updateHeartbeat(millis());
-    }
-  }
+  updateControlTask(now);
+  updateWifiTelemetryTask(now);
+  updateSerialPrintTask(now);
 }

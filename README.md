@@ -1,2 +1,5 @@
 # DRAWBOT-26
 Projet DRAWBOT | Systèmes Bouclés | ECE 2026
+
+IP ESP32 : 192.168.0.27
+Envoi UDP vers 192.168.0.32:47269
