@@ -1,6 +1,5 @@
 #pragma once
-
-#include <stdint.h>
+#include <Arduino.h>
 
 void initEncoders();
 
@@ -13,13 +12,11 @@ void resetEncoders();
 
 void updateEncoderMeasurements(unsigned long nowMs);
 
-// Distances
 float getLeftDistanceCm();
 float getRightDistanceCm();
 float getAverageDistanceCm();
 
-// Vitesses
-float getLeftSpeedTicksParSec();
-float getRightSpeedTicksParSec();
 float getLeftSpeedCmParSec();
 float getRightSpeedCmParSec();
+float getLeftSpeedTicksParSec();
+float getRightSpeedTicksParSec();
