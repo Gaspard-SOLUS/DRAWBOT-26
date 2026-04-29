@@ -1,467 +1,396 @@
-/**
- * ============================================================
- *  DRAWBOT – main.cpp
- *  Plateforme Gyrobot / NodeMCU ESP32
- *  ECE – Systèmes Bouclés 2026
- * ============================================================
- *
- *  Architecture :
- *    - Point d'accès WiFi (AP) propre sur 192.168.4.1
- *    - Serveur HTTP port 80  → page de réglages + commandes
- *    - Séquence 1 : escalier  (module escalier.cpp)
- *    - Séquence 2 : cercle    (à implémenter)
- *    - Séquence 3 : rose des vents (à implémenter)
- *    - Odométrie différentielle mise à jour toutes les 20 ms
- *    - Télémétrie série (compatible Teleplot) toutes les 200 ms
- * ============================================================
- */
-
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <math.h>
 
 #include "include/pins.h"
 #include "include/moteurs.h"
 #include "include/encodeurs.h"
 #include "include/avance.h"
-#include "include/escalier.h"
 #include "include/pid_vitesse.h"
 
-// ============================================================
-// WIFI – Point d'accès
-// ============================================================
-static const char* AP_SSID     = "Drawbot";
-static const char* AP_PASSWORD = "12345678";
+// ================= WIFI =================
+const char* web_ssid = "SFR-8e1e";
+const char* web_password = "Y2MHGM1AEM1J";
 
 WebServer server(80);
 
-// ============================================================
-// ODOMÉTRIE
-// ============================================================
-static float wheelBaseCm  = 12.5f;
-static float penOffsetCm  = 13.5f;                      // stylo en avant du centre
+// ================= PARAMÈTRES RÉGLABLES =================
 
-static float xRobot    = 0.0f;
-static float yRobot    = 0.0f;
-static float thetaRad  = 0.0f;   // cap en radians (0 = avant)
-static float xPen      = 0.0f;
-static float yPen      = 0.0f;
+// Segments droits
+float DIST_1_CM = 20.0;
+float DIST_2_CM = 10.0;
+float DIST_3_CM = 40.0;
 
-static float lastLeftCm  = 0.0f;
-static float lastRightCm = 0.0f;
+// Avance avec avance.h
+int CRUISE_PWM = 210;
+int SLOW_PWM = 150;
+float SLOW_ZONE_CM = 2.0;
+float KP_STRAIGHT = 0.5;
 
-void resetOdometry() {
-    xRobot   = 0.0f;
-    yRobot   = 0.0f;
-    thetaRad = 0.0f;
-    xPen     = penOffsetCm;
-    yPen     = 0.0f;
-    lastLeftCm  = getLeftDistanceCm();
-    lastRightCm = getRightDistanceCm();
-}
+// PID vitesse
+float KP_PID = 6.0;
+float KI_PID = 1.6;
+float KD_PID = 0.0;
 
-void updateOdometry() {
-    float lCm = getLeftDistanceCm();
-    float rCm = getRightDistanceCm();
-    float dL  = lCm - lastLeftCm;
-    float dR  = rCm - lastRightCm;
-    lastLeftCm  = lCm;
-    lastRightCm = rCm;
+// Virage gauche 90°
+float TURN_LEFT_CM = 5.0;
+int LEFT_TURN_PWM_L_1 = 130;
+int LEFT_TURN_PWM_R_1 = 240;
+int LEFT_TURN_PWM_L_2 = 150;
+int LEFT_TURN_PWM_R_2 = 190;
+float LEFT_TURN_PHASE_1_CM = 1.0;
 
-    float dCenter = (dL + dR) * 0.5f;
-    float dTheta  = (dR - dL) / wheelBaseCm;
-    thetaRad += dTheta;
+// Virage droite 90°
+float TURN_RIGHT_CM = 5.0;
+int RIGHT_TURN_PWM_L_1 = 240;
+int RIGHT_TURN_PWM_R_1 = 130;
+int RIGHT_TURN_PWM_L_2 = 190;
+int RIGHT_TURN_PWM_R_2 = 150;
+float RIGHT_TURN_PHASE_1_CM = 1.0;
 
-    xRobot += dCenter * cosf(thetaRad);
-    yRobot += dCenter * sinf(thetaRad);
-    xPen    = xRobot + penOffsetCm * cosf(thetaRad);
-    yPen    = yRobot + penOffsetCm * sinf(thetaRad);
-}
+// ================= ÉTATS =================
 
-// Distance absolue moyenne (utile pour debug)
-static float distAbs() {
-    return (fabsf(getLeftDistanceCm()) + fabsf(getRightDistanceCm())) * 0.5f;
-}
-
-// ============================================================
-// MACHINE À ÉTATS PRINCIPALE
-// ============================================================
-enum MainState : uint8_t {
-    STATE_IDLE = 0,
-    STATE_SEQ1_ESCALIER,
-    STATE_SEQ2_CERCLE,
-    STATE_SEQ3_ROSE,
-    STATE_FINISHED
+enum State {
+  IDLE,
+  START,
+  AVANCE_1,
+  TURN_LEFT,
+  AVANCE_2,
+  TURN_RIGHT,
+  AVANCE_3,
+  FINISHED
 };
 
-static MainState mainState = STATE_IDLE;
+State state = IDLE;
 
-static const char* stateNames[] = {
-    "IDLE", "SEQ1_ESCALIER", "SEQ2_CERCLE", "SEQ3_ROSE", "FINISHED"
-};
+unsigned long lastEncoderUpdate = 0;
+unsigned long lastPrint = 0;
 
-// ============================================================
-// TIMING
-// ============================================================
-static unsigned long lastEncoderUpdate = 0;
-static unsigned long lastTelemetry     = 0;
+bool sequenceRunning = false;
 
-// ============================================================
-// PID – paramètres exposés à la page web
-// ============================================================
-static float pidKp = 6.0f;
-static float pidKi = 1.6f;
-static float pidKd = 0.0f;
+// ================= OUTILS =================
 
-// ============================================================
-// HELPERS HTML
-// ============================================================
-static String htmlInput(const String& label, const String& name, const String& value) {
-    return "<label>" + label + "</label><br>"
-           "<input name='" + name + "' value='" + value + "'><br><br>";
+float distAbs() {
+  return (fabs(getLeftDistanceCm()) + fabs(getRightDistanceCm())) / 2.0;
 }
 
-static String htmlSection(const String& title, const String& content) {
-    return "<div class='card'><h2>" + title + "</h2>" + content + "</div>";
+void updateEncoderTask(unsigned long now) {
+  if (now - lastEncoderUpdate >= 20) {
+    lastEncoderUpdate = now;
+    updateEncoderMeasurements(now);
+  }
 }
 
-// ============================================================
-// PAGE PRINCIPALE
-// ============================================================
+void printTelemetry(unsigned long now) {
+  if (now - lastPrint >= 200) {
+    lastPrint = now;
+
+    Serial.print("state=");
+    Serial.print(state);
+    Serial.print(" | L=");
+    Serial.print(getLeftDistanceCm(), 2);
+    Serial.print(" | R=");
+    Serial.print(getRightDistanceCm(), 2);
+    Serial.print(" | distAbs=");
+    Serial.println(distAbs(), 2);
+
+    Serial.print(">state:");
+    Serial.println(state);
+    Serial.print(">distL:");
+    Serial.println(getLeftDistanceCm());
+    Serial.print(">distR:");
+    Serial.println(getRightDistanceCm());
+    Serial.print(">distAbs:");
+    Serial.println(distAbs());
+  }
+}
+
+void stopSequence() {
+  stopMotors();
+  sequenceRunning = false;
+  state = IDLE;
+  resetEncoders();
+  Serial.println("Sequence stoppee");
+}
+
+// ================= PAGE WEB =================
+
+String htmlPage() {
+  String html = "";
+
+  html += "<!DOCTYPE html><html><head><meta charset='utf-8'>";
+  html += "<title>Drawbot Control</title>";
+  html += "<style>";
+  html += "body{font-family:Arial;margin:30px;background:#f5f5f5;}";
+  html += "h1{color:#222;} .box{background:white;padding:18px;margin-bottom:18px;border-radius:10px;}";
+  html += "input{width:80px;margin:5px;} button{padding:10px 18px;margin:5px;font-size:15px;}";
+  html += "</style></head><body>";
+
+  html += "<h1>Drawbot - Sequence escalier</h1>";
+
+  html += "<div class='box'>";
+  html += "<h2>Commandes</h2>";
+  html += "<a href='/start'><button>Lancer escalier</button></a>";
+  html += "<a href='/stop'><button>Stop</button></a>";
+  html += "</div>";
+
+  html += "<form action='/update' method='GET'>";
+
+  html += "<div class='box'>";
+  html += "<h2>Distances</h2>";
+  html += "Ligne 1: <input name='d1' value='" + String(DIST_1_CM) + "'> cm<br>";
+  html += "Ligne 2: <input name='d2' value='" + String(DIST_2_CM) + "'> cm<br>";
+  html += "Ligne 3: <input name='d3' value='" + String(DIST_3_CM) + "'> cm<br>";
+  html += "</div>";
+
+  html += "<div class='box'>";
+  html += "<h2>Avance droite</h2>";
+  html += "CRUISE_PWM: <input name='cruise' value='" + String(CRUISE_PWM) + "'><br>";
+  html += "SLOW_PWM: <input name='slow' value='" + String(SLOW_PWM) + "'><br>";
+  html += "SLOW_ZONE_CM: <input name='slowzone' value='" + String(SLOW_ZONE_CM) + "'><br>";
+  html += "KP_STRAIGHT: <input name='kpstraight' value='" + String(KP_STRAIGHT) + "'><br>";
+  html += "</div>";
+
+  html += "<div class='box'>";
+  html += "<h2>PID vitesse</h2>";
+  html += "Kp: <input name='kppid' value='" + String(KP_PID) + "'><br>";
+  html += "Ki: <input name='kipid' value='" + String(KI_PID) + "'><br>";
+  html += "Kd: <input name='kdpid' value='" + String(KD_PID) + "'><br>";
+  html += "</div>";
+
+  html += "<div class='box'>";
+  html += "<h2>Virage gauche 90 deg</h2>";
+  html += "TURN_LEFT_CM: <input name='tlcm' value='" + String(TURN_LEFT_CM) + "'><br>";
+  html += "Phase 1 gauche: <input name='tl_l1' value='" + String(LEFT_TURN_PWM_L_1) + "'>";
+  html += " droite: <input name='tl_r1' value='" + String(LEFT_TURN_PWM_R_1) + "'><br>";
+  html += "Phase 2 gauche: <input name='tl_l2' value='" + String(LEFT_TURN_PWM_L_2) + "'>";
+  html += " droite: <input name='tl_r2' value='" + String(LEFT_TURN_PWM_R_2) + "'><br>";
+  html += "Fin phase 1: <input name='tlp1' value='" + String(LEFT_TURN_PHASE_1_CM) + "'> cm<br>";
+  html += "</div>";
+
+  html += "<div class='box'>";
+  html += "<h2>Virage droite 90 deg</h2>";
+  html += "TURN_RIGHT_CM: <input name='trcm' value='" + String(TURN_RIGHT_CM) + "'><br>";
+  html += "Phase 1 gauche: <input name='tr_l1' value='" + String(RIGHT_TURN_PWM_L_1) + "'>";
+  html += " droite: <input name='tr_r1' value='" + String(RIGHT_TURN_PWM_R_1) + "'><br>";
+  html += "Phase 2 gauche: <input name='tr_l2' value='" + String(RIGHT_TURN_PWM_L_2) + "'>";
+  html += " droite: <input name='tr_r2' value='" + String(RIGHT_TURN_PWM_R_2) + "'><br>";
+  html += "Fin phase 1: <input name='trp1' value='" + String(RIGHT_TURN_PHASE_1_CM) + "'> cm<br>";
+  html += "</div>";
+
+  html += "<button type='submit'>Enregistrer les valeurs</button>";
+  html += "</form>";
+
+  html += "</body></html>";
+
+  return html;
+}
+
 void handleRoot() {
-    const EscalierParams& p = escalierGetParams();
-
-    String html;
-    html.reserve(8192);
-
-    html += "<!DOCTYPE html><html><head>";
-    html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-    html += "<meta charset='utf-8'>";
-    html += "<title>Drawbot</title>";
-    html += "<style>";
-    html += "body{font-family:Arial,sans-serif;background:#111;color:#eee;margin:0;padding:20px 20px 20px 230px;}";
-    html += ".sidebar{position:fixed;left:0;top:0;width:210px;height:100vh;background:#181818;padding:15px;box-sizing:border-box;overflow-y:auto;}";
-    html += ".sidebar h2{color:#0af;margin-top:0;}";
-    html += ".content{max-width:860px;}";
-    html += "input{width:100%;padding:8px;font-size:16px;margin-top:4px;box-sizing:border-box;background:#333;color:#eee;border:1px solid #555;border-radius:4px;}";
-    html += "a.btn,button{display:block;text-align:center;padding:12px;margin:8px 0;background:#2b7cff;color:#fff;text-decoration:none;border-radius:6px;border:0;font-size:16px;cursor:pointer;width:100%;}";
-    html += "a.btn.stop{background:#c22;}";
-    html += "a.btn.seq1{background:#0a7;}";
-    html += "a.btn.seq2{background:#a70;}";
-    html += "a.btn.seq3{background:#70a;}";
-    html += ".card{background:#222;padding:15px;border-radius:8px;margin-bottom:15px;}";
-    html += ".telemetry{font-family:monospace;font-size:14px;line-height:1.7;}";
-    html += "h1{color:#0af;}h2{color:#8cf;margin-top:0;}";
-    html += "label{font-size:14px;color:#aaa;}";
-    html += "@media(max-width:700px){body{padding:10px}.sidebar{position:static;width:100%;height:auto;display:flex;flex-wrap:wrap;gap:6px;padding:10px;}.sidebar a.btn{width:calc(50% - 3px);margin:0;}}";
-    html += "</style></head><body>";
-
-    // --- Sidebar ---
-    html += "<div class='sidebar'>";
-    html += "<h2>Drawbot</h2>";
-    html += "<a class='btn' href='/go_seq1'>▶ Séquence 1<br><small>Escalier</small></a>";
-    html += "<a class='btn seq2' href='/go_seq2'>▶ Séquence 2<br><small>Cercle</small></a>";
-    html += "<a class='btn seq3' href='/go_seq3'>▶ Séquence 3<br><small>Rose des vents</small></a>";
-    html += "<a class='btn stop' href='/stop'>■ STOP</a>";
-    html += "<a class='btn' href='/reset'>↺ Reset</a>";
-    html += "</div>";
-
-    // --- Contenu ---
-    html += "<div class='content'>";
-    html += "<h1>Drawbot – Réglages</h1>";
-
-    // Télémétrie live
-    html += "<div class='card telemetry'>";
-    html += "<b>État :</b> " + String(stateNames[mainState]) + "<br>";
-    if (mainState == STATE_SEQ1_ESCALIER) {
-        html += "<b>Étape :</b> " + String(escalierGetStepName()) + "<br>";
-    }
-    html += "<b>Dist moy :</b> " + String(distAbs(), 2) + " cm | ";
-    html += "<b>Theta :</b> " + String(thetaRad * 180.0f / PI, 1) + "°<br>";
-    html += "<b>xPen :</b> " + String(xPen, 2) + " cm | ";
-    html += "<b>yPen :</b> " + String(yPen, 2) + " cm<br>";
-    html += "<b>Ticks G :</b> " + String(getLeftEncoderTicks()) + " | ";
-    html += "<b>Ticks D :</b> " + String(getRightEncoderTicks()) + "<br>";
-    html += "<b>Vit G :</b> " + String(getLeftSpeedCmParSec(), 1) + " cm/s | ";
-    html += "<b>Vit D :</b> " + String(getRightSpeedCmParSec(), 1) + " cm/s";
-    html += "</div>";
-
-    html += "<form action='/set' method='get'>";
-
-    // --- Section Séquence 1 ---
-    String s1 = "";
-    s1 += htmlInput("Segment 1 (cm)", "seg1", String(p.seg1Cm));
-    s1 += htmlInput("Segment 2 (cm)", "seg2", String(p.seg2Cm));
-    s1 += htmlInput("Segment 3 (cm)", "seg3", String(p.seg3Cm));
-    s1 += htmlInput("PWM croisière", "cruise", String(p.cruisePwm));
-    s1 += htmlInput("PWM lent", "slow", String(p.slowPwm));
-    s1 += htmlInput("Zone lente (cm)", "slowzone", String(p.slowZoneCm));
-    s1 += htmlInput("Kp cap droit", "kp", String(p.kpStraight));
-    s1 += htmlInput("Durée freinage (ms)", "brakeMs", String((int)p.brakeMs));
-    html += htmlSection("Séquence 1 – Escalier – Lignes droites", s1);
-
-    String s1t = "";
-    s1t += htmlInput("Virage gauche – PWM roue ext. (droite)", "tlOuterPwm", String(p.turnLeftOuterPwm));
-    s1t += htmlInput("Virage gauche – PWM roue int. (gauche)", "tlInnerPwm", String(p.turnLeftInnerPwm));
-    s1t += htmlInput("Virage droite – PWM roue ext. (gauche)", "trOuterPwm", String(p.turnRightOuterPwm));
-    s1t += htmlInput("Virage droite – PWM roue int. (droite)", "trInnerPwm", String(p.turnRightInnerPwm));
-    html += htmlSection("Séquence 1 – Escalier – Virages 90°", s1t);
-
-    // --- Section PID vitesse ---
-    String spid = "";
-    spid += htmlInput("Kp", "pidKp", String(pidKp));
-    spid += htmlInput("Ki", "pidKi", String(pidKi));
-    spid += htmlInput("Kd", "pidKd", String(pidKd));
-    html += htmlSection("PID Vitesse (boucle fermée vitesse roues)", spid);
-
-    // --- Section robot ---
-    String srobot = "";
-    srobot += htmlInput("Entraxe (cm)", "wheelbase", String(wheelBaseCm));
-    srobot += htmlInput("Décalage stylo (cm)", "penoffset", String(penOffsetCm));
-    html += htmlSection("Paramètres robot", srobot);
-
-    html += "<button type='submit'>💾 Enregistrer les réglages</button>";
-    html += "</form>";
-    html += "</div>";
-    html += "</body></html>";
-
-    server.send(200, "text/html", html);
+  server.send(200, "text/html", htmlPage());
 }
 
-// ============================================================
-// HANDLER SET – applique les paramètres reçus
-// ============================================================
-void handleSet() {
-    EscalierParams p = escalierGetParams(); // copie mutable
-
-    if (server.hasArg("seg1"))      p.seg1Cm           = server.arg("seg1").toFloat();
-    if (server.hasArg("seg2"))      p.seg2Cm           = server.arg("seg2").toFloat();
-    if (server.hasArg("seg3"))      p.seg3Cm           = server.arg("seg3").toFloat();
-    if (server.hasArg("cruise"))    p.cruisePwm        = server.arg("cruise").toInt();
-    if (server.hasArg("slow"))      p.slowPwm          = server.arg("slow").toInt();
-    if (server.hasArg("slowzone"))  p.slowZoneCm       = server.arg("slowzone").toFloat();
-    if (server.hasArg("kp"))        p.kpStraight       = server.arg("kp").toFloat();
-    if (server.hasArg("brakeMs"))   p.brakeMs          = (unsigned long)server.arg("brakeMs").toInt();
-    if (server.hasArg("tlOuterPwm")) p.turnLeftOuterPwm  = server.arg("tlOuterPwm").toFloat();
-    if (server.hasArg("tlInnerPwm")) p.turnLeftInnerPwm  = server.arg("tlInnerPwm").toFloat();
-    if (server.hasArg("trOuterPwm")) p.turnRightOuterPwm = server.arg("trOuterPwm").toFloat();
-    if (server.hasArg("trInnerPwm")) p.turnRightInnerPwm = server.arg("trInnerPwm").toFloat();
-    if (server.hasArg("wheelbase")) wheelBaseCm = server.arg("wheelbase").toFloat();
-    if (server.hasArg("penoffset")) penOffsetCm = server.arg("penoffset").toFloat();
-
-    escalierSetParams(p);
-
-    // PID
-    if (server.hasArg("pidKp")) pidKp = server.arg("pidKp").toFloat();
-    if (server.hasArg("pidKi")) pidKi = server.arg("pidKi").toFloat();
-    if (server.hasArg("pidKd")) pidKd = server.arg("pidKd").toFloat();
-    setPidGains(pidKp, pidKi, pidKd);
-
-    Serial.println("[WEB] Réglages mis à jour");
-    server.sendHeader("Location", "/");
-    server.send(303);
-}
-
-// ============================================================
-// HANDLERS COMMANDES
-// ============================================================
-void handleGoSeq1() {
-    stopMotors();
-    resetEncoders();
-    resetOdometry();
-    escalierStart();
-    mainState = STATE_SEQ1_ESCALIER;
-    Serial.println("[WEB] GO Séquence 1 – Escalier");
-    server.sendHeader("Location", "/");
-    server.send(303);
-}
-
-void handleGoSeq2() {
-    stopMotors();
-    resetEncoders();
-    resetOdometry();
-    mainState = STATE_SEQ2_CERCLE;
-    Serial.println("[WEB] GO Séquence 2 – Cercle (TODO)");
-    server.sendHeader("Location", "/");
-    server.send(303);
-}
-
-void handleGoSeq3() {
-    stopMotors();
-    resetEncoders();
-    resetOdometry();
-    mainState = STATE_SEQ3_ROSE;
-    Serial.println("[WEB] GO Séquence 3 – Rose des vents (TODO)");
-    server.sendHeader("Location", "/");
-    server.send(303);
+void handleStart() {
+  resetEncoders();
+  sequenceRunning = true;
+  state = START;
+  server.send(200, "text/html", "<h1>Sequence lancee</h1><a href='/'>Retour</a>");
 }
 
 void handleStop() {
-    stopMotors();
-    escalierReset();
-    mainState = STATE_IDLE;
-    Serial.println("[WEB] STOP");
-    server.sendHeader("Location", "/");
-    server.send(303);
+  stopSequence();
+  server.send(200, "text/html", "<h1>Robot stoppe</h1><a href='/'>Retour</a>");
 }
 
-void handleReset() {
-    stopMotors();
-    resetEncoders();
-    resetOdometry();
-    escalierReset();
-    mainState = STATE_IDLE;
-    Serial.println("[WEB] Reset odométrie");
-    server.sendHeader("Location", "/");
-    server.send(303);
+void readFloatParam(const char* name, float& value) {
+  if (server.hasArg(name)) value = server.arg(name).toFloat();
 }
 
-// ============================================================
-// TÉLÉMÉTRIE SÉRIE – compatible Teleplot
-// Préfixe '>' → variable tracée dans Teleplot
-// ============================================================
-void printTelemetry(unsigned long now) {
-    if (now - lastTelemetry < 200) return;
-    lastTelemetry = now;
+void readIntParam(const char* name, int& value) {
+  if (server.hasArg(name)) value = server.arg(name).toInt();
+}
 
-    // Format lisible
-    Serial.printf("state=%s | distL=%.2f | distR=%.2f | theta=%.1f° | xPen=%.2f | yPen=%.2f\n",
-        stateNames[mainState],
-        getLeftDistanceCm(), getRightDistanceCm(),
-        thetaRad * 180.0f / PI, xPen, yPen);
+void handleUpdate() {
+  readFloatParam("d1", DIST_1_CM);
+  readFloatParam("d2", DIST_2_CM);
+  readFloatParam("d3", DIST_3_CM);
 
-    if (mainState == STATE_SEQ1_ESCALIER) {
-        Serial.printf("  escalier=%s\n", escalierGetStepName());
+  readIntParam("cruise", CRUISE_PWM);
+  readIntParam("slow", SLOW_PWM);
+  readFloatParam("slowzone", SLOW_ZONE_CM);
+  readFloatParam("kpstraight", KP_STRAIGHT);
+
+  readFloatParam("kppid", KP_PID);
+  readFloatParam("kipid", KI_PID);
+  readFloatParam("kdpid", KD_PID);
+  setPidGains(KP_PID, KI_PID, KD_PID);
+
+  readFloatParam("tlcm", TURN_LEFT_CM);
+  readIntParam("tl_l1", LEFT_TURN_PWM_L_1);
+  readIntParam("tl_r1", LEFT_TURN_PWM_R_1);
+  readIntParam("tl_l2", LEFT_TURN_PWM_L_2);
+  readIntParam("tl_r2", LEFT_TURN_PWM_R_2);
+  readFloatParam("tlp1", LEFT_TURN_PHASE_1_CM);
+
+  readFloatParam("trcm", TURN_RIGHT_CM);
+  readIntParam("tr_l1", RIGHT_TURN_PWM_L_1);
+  readIntParam("tr_r1", RIGHT_TURN_PWM_R_1);
+  readIntParam("tr_l2", RIGHT_TURN_PWM_L_2);
+  readIntParam("tr_r2", RIGHT_TURN_PWM_R_2);
+  readFloatParam("trp1", RIGHT_TURN_PHASE_1_CM);
+
+  server.send(200, "text/html", "<h1>Valeurs enregistrees</h1><a href='/'>Retour</a>");
+}
+
+// ================= SÉQUENCE ESCALIER =================
+
+void updateSequence() {
+  switch (state) {
+
+    case IDLE:
+      stopMotors();
+      break;
+
+    case START:
+      Serial.println("PHASE 1 : AVANCE 20 CM");
+      startAvanceForwardDistance(DIST_1_CM, CRUISE_PWM, SLOW_PWM, SLOW_ZONE_CM, KP_STRAIGHT);
+      state = AVANCE_1;
+      break;
+
+    case AVANCE_1:
+      updateAvance(millis());
+
+      if (isAvanceTermine()) {
+        stopMotors();
+        delay(200);
+        resetEncoders();
+
+        Serial.println("PHASE 2 : VIRAGE GAUCHE 90");
+        state = TURN_LEFT;
+      }
+      break;
+
+    case TURN_LEFT: {
+      float d = distAbs();
+
+      if (d < LEFT_TURN_PHASE_1_CM) {
+        setMotors(LEFT_TURN_PWM_L_1, LEFT_TURN_PWM_R_1);
+      } else {
+        setMotors(LEFT_TURN_PWM_L_2, LEFT_TURN_PWM_R_2);
+      }
+
+      if (d >= TURN_LEFT_CM) {
+        stopMotors();
+        delay(200);
+        resetEncoders();
+
+        Serial.println("PHASE 3 : AVANCE 10 CM");
+        startAvanceForwardDistance(DIST_2_CM, CRUISE_PWM, SLOW_PWM, SLOW_ZONE_CM, KP_STRAIGHT);
+        state = AVANCE_2;
+      }
+      break;
     }
 
-    // Variables Teleplot
-    Serial.printf(">distL:%.3f\n",   getLeftDistanceCm());
-    Serial.printf(">distR:%.3f\n",   getRightDistanceCm());
-    Serial.printf(">speedL:%.3f\n",  getLeftSpeedCmParSec());
-    Serial.printf(">speedR:%.3f\n",  getRightSpeedCmParSec());
-    Serial.printf(">thetaDeg:%.2f\n", thetaRad * 180.0f / PI);
-    Serial.printf(">xPen:%.3f\n",    xPen);
-    Serial.printf(">yPen:%.3f\n",    yPen);
-    Serial.printf(">ticksL:%ld\n",   getLeftEncoderTicks());
-    Serial.printf(">ticksR:%ld\n",   getRightEncoderTicks());
+    case AVANCE_2:
+      updateAvance(millis());
 
-    // PID debug si actif
-    Serial.printf(">pidErrL:%.3f\n", getLeftPidError());
-    Serial.printf(">pidErrR:%.3f\n", getRightPidError());
-    Serial.printf(">pidOutL:%.3f\n", getLeftPidOutput());
-    Serial.printf(">pidOutR:%.3f\n", getRightPidOutput());
+      if (isAvanceTermine()) {
+        stopMotors();
+        delay(200);
+        resetEncoders();
+
+        Serial.println("PHASE 4 : VIRAGE DROITE 90");
+        state = TURN_RIGHT;
+      }
+      break;
+
+    case TURN_RIGHT: {
+      float d = distAbs();
+
+      if (d < RIGHT_TURN_PHASE_1_CM) {
+        setMotors(RIGHT_TURN_PWM_L_1, RIGHT_TURN_PWM_R_1);
+      } else {
+        setMotors(RIGHT_TURN_PWM_L_2, RIGHT_TURN_PWM_R_2);
+      }
+
+      if (d >= TURN_RIGHT_CM) {
+        stopMotors();
+        delay(200);
+        resetEncoders();
+
+        Serial.println("PHASE 5 : AVANCE 40 CM");
+        startAvanceForwardDistance(DIST_3_CM, CRUISE_PWM, SLOW_PWM, SLOW_ZONE_CM, KP_STRAIGHT);
+        state = AVANCE_3;
+      }
+      break;
+    }
+
+    case AVANCE_3:
+      updateAvance(millis());
+
+      if (isAvanceTermine()) {
+        stopMotors();
+        Serial.println("SEQUENCE ESCALIER TERMINEE");
+        state = FINISHED;
+      }
+      break;
+
+    case FINISHED:
+      stopMotors();
+      sequenceRunning = false;
+      break;
+  }
 }
 
-// ============================================================
-// SETUP
-// ============================================================
+// ================= SETUP / LOOP =================
+
 void setup() {
-    Serial.begin(115200);
-    delay(200);
-    Serial.println("\n=== DRAWBOT – Démarrage ===");
+  Serial.begin(115200);
 
-    // LEDs utilisateur
-    pinMode(LEDU1, OUTPUT);
-    pinMode(LEDU2, OUTPUT);
-    digitalWrite(LEDU1, HIGH);
-    digitalWrite(LEDU2, LOW);
+  pinMode(LEDU1, OUTPUT);
+  pinMode(LEDU2, OUTPUT);
 
-    // Modules matériel
-    initMotors();
-    initEncoders();
-    initPidVitesse();
-    setPidGains(pidKp, pidKi, pidKd);
+  initMotors();
+  initEncoders();
+  initPidVitesse();
+  resetEncoders();
 
-    resetEncoders();
-    resetOdometry();
+  setPidGains(KP_PID, KI_PID, KD_PID);
 
-    // WiFi en mode Access Point
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASSWORD);
-    IPAddress apIP = WiFi.softAPIP();
-    Serial.printf("[WiFi] AP créé : %s – IP : %s\n", AP_SSID, apIP.toString().c_str());
+  WiFi.begin(web_ssid, web_password);
+  Serial.print("Connexion WiFi");
 
-    // Routes HTTP
-    server.on("/",         handleRoot);
-    server.on("/set",      handleSet);
-    server.on("/go_seq1",  handleGoSeq1);
-    server.on("/go_seq2",  handleGoSeq2);
-    server.on("/go_seq3",  handleGoSeq3);
-    server.on("/stop",     handleStop);
-    server.on("/reset",    handleReset);
-    server.begin();
-    Serial.println("[Web] Serveur HTTP démarré sur port 80");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
 
-    lastEncoderUpdate = millis();
-    lastTelemetry     = millis();
+  Serial.println();
+  Serial.print("IP ESP32 : ");
+  Serial.println(WiFi.localIP());
 
-    digitalWrite(LEDU1, LOW);
-    digitalWrite(LEDU2, HIGH);
-    Serial.println("[DRAWBOT] Prêt. Connectez-vous au WiFi \"Drawbot\" → http://192.168.4.1");
+  server.on("/", handleRoot);
+  server.on("/start", handleStart);
+  server.on("/stop", handleStop);
+  server.on("/update", handleUpdate);
+
+  server.begin();
+
+  lastEncoderUpdate = millis();
+  lastPrint = millis();
+
+  Serial.println("Serveur web demarre");
 }
 
-// ============================================================
-// LOOP
-// ============================================================
 void loop() {
-    unsigned long now = millis();
+  unsigned long now = millis();
 
-    // --- Serveur web ---
-    server.handleClient();
+  server.handleClient();
+  updateEncoderTask(now);
+  printTelemetry(now);
 
-    // --- Mise à jour encodeurs + odométrie (toutes les 20 ms) ---
-    if (now - lastEncoderUpdate >= 20) {
-        lastEncoderUpdate = now;
-        updateEncoderMeasurements(now);
-        updateOdometry();
-    }
-
-    // --- Télémétrie série ---
-    printTelemetry(now);
-
-    // --- Machine à états principale ---
-    switch (mainState) {
-
-    // ----------------------------------------------------------
-    case STATE_IDLE:
-        // Rien à faire, attente commande web
-        break;
-
-    // ----------------------------------------------------------
-    case STATE_SEQ1_ESCALIER:
-        escalierUpdate(now);
-        if (escalierIsFinished()) {
-            stopMotors();
-            mainState = STATE_FINISHED;
-            Serial.println("[MAIN] Séquence 1 terminée !");
-        }
-        break;
-
-    // ----------------------------------------------------------
-    case STATE_SEQ2_CERCLE:
-        // TODO : implémenter cercle.cpp / cercleUpdate(now)
-        // Exemple d'appel futur :
-        //   cercleUpdate(now);
-        //   if (cercleIsFinished()) { mainState = STATE_FINISHED; }
-        //
-        // Pour l'instant on s'arrête proprement
-        stopMotors();
-        mainState = STATE_FINISHED;
-        Serial.println("[MAIN] Séquence 2 – non encore implémentée");
-        break;
-
-    // ----------------------------------------------------------
-    case STATE_SEQ3_ROSE:
-        // TODO : implémenter rose.cpp / roseUpdate(now)
-        stopMotors();
-        mainState = STATE_FINISHED;
-        Serial.println("[MAIN] Séquence 3 – non encore implémentée");
-        break;
-
-    // ----------------------------------------------------------
-    case STATE_FINISHED:
-        stopMotors();
-        // Reste dans cet état jusqu'à commande web
-        break;
-    }
+  if (sequenceRunning || state != IDLE) {
+    updateSequence();
+  }
 }
