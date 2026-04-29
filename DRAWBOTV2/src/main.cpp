@@ -37,13 +37,16 @@ float lastRightCm = 0.0;
 // =============== PARAMETRES REGLABLES =============
 // ==================================================
 
-float dist1Cm = 12.0;
-float dist2Cm = 13.0;
-float dist3Cm = 13.0;
+float dist1Cm = 20.0;
+float dist2Cm = 10.0;
+float dist3Cm = 40.0;
+
+float leftTargetAngleDeg = 90.0;
+float rightTargetAngleDeg = 90.0;
 
 int cruisePwm = 210;
 int slowPwm = 150;
-float slowZoneCm = 0.0;
+float slowZoneCm = 0.5;
 float kpStraight = 1.5;
 
 // Virage gauche
@@ -248,6 +251,7 @@ void handleRoot() {
   html += htmlInput("PWM droite debut gauche", "leftStartR", String(leftTurnStartRightPwm));
   html += htmlInput("PWM gauche virage gauche", "leftTurnL", String(leftTurnLeftPwm));
   html += htmlInput("PWM droite virage gauche", "leftTurnR", String(leftTurnRightPwm));
+  html += htmlInput("Angle gauche deg", "leftAngle", String(leftTargetAngleDeg));
   html += "</div>";
 
   html += "<div class='card'>";
@@ -258,6 +262,7 @@ void handleRoot() {
   html += htmlInput("PWM droite debut droite", "rightStartR", String(rightTurnStartRightPwm));
   html += htmlInput("PWM gauche virage droite", "rightTurnL", String(rightTurnLeftPwm));
   html += htmlInput("PWM droite virage droite", "rightTurnR", String(rightTurnRightPwm));
+  html += htmlInput("Angle droite deg", "rightAngle", String(rightTargetAngleDeg));
   html += "</div>";
 
   html += "<div class='card'>";
@@ -302,6 +307,9 @@ void handleSet() {
   if (server.hasArg("wheelbase")) wheelBaseCm = server.arg("wheelbase").toFloat();
   if (server.hasArg("penoffset")) penOffsetCm = server.arg("penoffset").toFloat();
 
+  if (server.hasArg("leftAngle")) leftTargetAngleDeg = server.arg("leftAngle").toFloat();
+  if (server.hasArg("rightAngle")) rightTargetAngleDeg = server.arg("rightAngle").toFloat();
+
   Serial.println("Reglages mis a jour");
 
   server.sendHeader("Location", "/");
@@ -312,7 +320,6 @@ void handleGo() {
   stopMotors();
 
   resetEncoders();
-  resetOdometry();
 
   state = START;
 
@@ -420,7 +427,6 @@ void loop() {
 
       if (isAvanceTermine()) {
         resetEncoders();
-        resetOdometry();
 
         Serial.println("PHASE 2 : ANGLE GAUCHE");
         state = TURN_LEFT;
@@ -438,7 +444,6 @@ void loop() {
 
       if (d >= leftTurnStopDistanceCm) {
         resetEncoders();
-        resetOdometry();
 
         startAvanceForwardDistance(dist2Cm, cruisePwm, slowPwm, slowZoneCm, kpStraight);
         state = AVANCE_2;
@@ -451,9 +456,8 @@ void loop() {
 
       if (isAvanceTermine()) {
         resetEncoders();
-        resetOdometry();
 
-        Serial.println("PHASE 4 : ANGLE DROIT");
+        Serial.println("PHASE 4 : VIRAGE A DROITE");
         state = TURN_RIGHT;
       }
       break;
@@ -469,7 +473,6 @@ void loop() {
 
       if (d >= rightTurnStopDistanceCm) {
         resetEncoders();
-        resetOdometry();
 
         startAvanceForwardDistance(dist3Cm, cruisePwm, slowPwm, slowZoneCm, kpStraight);
         state = AVANCE_3;
