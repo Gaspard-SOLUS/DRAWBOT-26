@@ -1,6 +1,8 @@
 #include <Arduino.h>
+#include <math.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Preferences.h>
 
 #include "include/pins.h"
 #include "include/moteurs.h"
@@ -8,351 +10,632 @@
 #include "include/avance.h"
 
 // ==================================================
-// ================= WIFI AP ========================
+// WIFI ESP32 EN POINT D'ACCES
 // ==================================================
-
-const char* apSsid = "Drawbot";
-const char* apPassword = "12345678";
+const char* AP_SSID = "DRAWBOT_ESP32";
+const char* AP_PASS = "12345678";
 
 WebServer server(80);
+Preferences prefs;
 
 // ==================================================
-// ================= ODOMETRIE ======================
+// PARAMETRES MODIFIABLES DEPUIS LA PAGE WEB
 // ==================================================
+struct Params {
+  float dist1 = 12.0;
+  float turnDist = 5.0;
+  float dist2 = 13.0;
 
-float wheelBaseCm = 8.3;
-float penOffsetCm = 13.5;
+  int cruisePwm = 210;
+  int slowPwm = 150;
+  float slowZone = 2.0;
+  float kpStraight = 0.5;
 
-float xRobot = 0.0;
-float yRobot = 0.0;
-float thetaRobot = 0.0;
+  int turnStartL = 140;
+  int turnStartR = 250;
+  int turnEndL = 150;
+  int turnEndR = 190;
 
-float xPen = 0.0;
-float yPen = 0.0;
+  int avance2StartL = 205;
+  int avance2StartR = 175;
+  int avance2EndL = 190;
+  int avance2EndR = 180;
+};
 
-float lastLeftCm = 0.0;
-float lastRightCm = 0.0;
-
-// ==================================================
-// =============== PARAMETRES REGLABLES =============
-// ==================================================
-
-float dist1Cm = 20.0;
-float dist2Cm = 10.0;
-float dist3Cm = 40.0;
-
-float leftTargetAngleDeg = 90.0;
-float rightTargetAngleDeg = 90.0;
-
-int cruisePwm = 210;
-int slowPwm = 150;
-float slowZoneCm = 0.5;
-float kpStraight = 1.5;
-
-// Virage gauche
-float leftTurnStartDistanceCm = 11.0;
-float leftTurnStopDistanceCm = 3.3;
-
-int leftTurnStartLeftPwm = 140;
-int leftTurnStartRightPwm = 225;
-
-int leftTurnLeftPwm = 160;
-int leftTurnRightPwm = 220;
-
-// Virage droite
-float rightTurnStartDistanceCm = 11.0;
-float rightTurnStopDistanceCm = 3.3;
-
-int rightTurnStartLeftPwm = 225;
-int rightTurnStartRightPwm = 140;
-
-int rightTurnLeftPwm = 220;
-int rightTurnRightPwm = 160;
+Params p;
 
 // ==================================================
-// ================= VARIABLES ======================
+// ETATS ROBOT
 // ==================================================
+enum State {
+  IDLE,
+  AVANCE_1,
+  TURN_CURVE,
+  AVANCE_2,
+  FINISHED,
+  MANUAL
+};
+
+State state = IDLE;
 
 unsigned long lastEncoderUpdate = 0;
 unsigned long lastPrint = 0;
 
-enum State {
-  START,
-  AVANCE_1,
-  TURN_LEFT,
-  AVANCE_2,
-  TURN_RIGHT,
-  AVANCE_3,
-  FINISHED
-};
-
-State state = FINISHED;
-
 // ==================================================
-// ================= ODOMETRIE ======================
+// OUTILS
 // ==================================================
-
-void resetOdometry() {
-  xRobot = 0.0;
-  yRobot = 0.0;
-  thetaRobot = 0.0;
-
-  xPen = penOffsetCm;
-  yPen = 0.0;
-
-  lastLeftCm = getLeftDistanceCm();
-  lastRightCm = getRightDistanceCm();
-}
-
-void updateOdometry() {
-  float leftCm = getLeftDistanceCm();
-  float rightCm = getRightDistanceCm();
-
-  float dL = leftCm - lastLeftCm;
-  float dR = rightCm - lastRightCm;
-
-  lastLeftCm = leftCm;
-  lastRightCm = rightCm;
-
-  float dCenter = (dL + dR) / 2.0;
-  float dTheta = (dR - dL) / wheelBaseCm;
-
-  thetaRobot += dTheta;
-
-  xRobot += dCenter * cos(thetaRobot);
-  yRobot += dCenter * sin(thetaRobot);
-
-  xPen = xRobot + penOffsetCm * cos(thetaRobot);
-  yPen = yRobot + penOffsetCm * sin(thetaRobot);
-}
-
 float distAbs() {
   return (fabs(getLeftDistanceCm()) + fabs(getRightDistanceCm())) / 2.0;
 }
-
-// ==================================================
-// ================= TELEMETRIE =====================
-// ==================================================
 
 void updateEncoderTask(unsigned long now) {
   if (now - lastEncoderUpdate >= 20) {
     lastEncoderUpdate = now;
     updateEncoderMeasurements(now);
-    updateOdometry();
   }
 }
 
+void stopRobot() {
+  stopMotors();
+  state = IDLE;
+}
+
+void resetRobot() {
+  stopMotors();
+  resetEncoders();
+  state = IDLE;
+}
+
+void startSequence() {
+  stopMotors();
+  resetEncoders();
+
+  Serial.println("PHASE 1 : AVANCE 1");
+  startAvanceForwardDistance(
+    p.dist1,
+    p.cruisePwm,
+    p.slowPwm,
+    p.slowZone,
+    p.kpStraight
+  );
+
+  state = AVANCE_1;
+}
+
+String stateName() {
+  switch (state) {
+    case IDLE: return "IDLE";
+    case AVANCE_1: return "AVANCE_1";
+    case TURN_CURVE: return "TURN_CURVE";
+    case AVANCE_2: return "AVANCE_2";
+    case FINISHED: return "FINISHED";
+    case MANUAL: return "MANUAL";
+  }
+  return "UNKNOWN";
+}
+
+// ==================================================
+// SAUVEGARDE FLASH
+// ==================================================
+void loadParams() {
+  prefs.begin("drawbot", true);
+
+  p.dist1 = prefs.getFloat("dist1", p.dist1);
+  p.turnDist = prefs.getFloat("turnDist", p.turnDist);
+  p.dist2 = prefs.getFloat("dist2", p.dist2);
+
+  p.cruisePwm = prefs.getInt("cruisePwm", p.cruisePwm);
+  p.slowPwm = prefs.getInt("slowPwm", p.slowPwm);
+  p.slowZone = prefs.getFloat("slowZone", p.slowZone);
+  p.kpStraight = prefs.getFloat("kpStraight", p.kpStraight);
+
+  p.turnStartL = prefs.getInt("turnStartL", p.turnStartL);
+  p.turnStartR = prefs.getInt("turnStartR", p.turnStartR);
+  p.turnEndL = prefs.getInt("turnEndL", p.turnEndL);
+  p.turnEndR = prefs.getInt("turnEndR", p.turnEndR);
+
+  p.avance2StartL = prefs.getInt("avance2StartL", p.avance2StartL);
+  p.avance2StartR = prefs.getInt("avance2StartR", p.avance2StartR);
+  p.avance2EndL = prefs.getInt("avance2EndL", p.avance2EndL);
+  p.avance2EndR = prefs.getInt("avance2EndR", p.avance2EndR);
+
+  prefs.end();
+}
+
+void saveParams() {
+  prefs.begin("drawbot", false);
+
+  prefs.putFloat("dist1", p.dist1);
+  prefs.putFloat("turnDist", p.turnDist);
+  prefs.putFloat("dist2", p.dist2);
+
+  prefs.putInt("cruisePwm", p.cruisePwm);
+  prefs.putInt("slowPwm", p.slowPwm);
+  prefs.putFloat("slowZone", p.slowZone);
+  prefs.putFloat("kpStraight", p.kpStraight);
+
+  prefs.putInt("turnStartL", p.turnStartL);
+  prefs.putInt("turnStartR", p.turnStartR);
+  prefs.putInt("turnEndL", p.turnEndL);
+  prefs.putInt("turnEndR", p.turnEndR);
+
+  prefs.putInt("avance2StartL", p.avance2StartL);
+  prefs.putInt("avance2StartR", p.avance2StartR);
+  prefs.putInt("avance2EndL", p.avance2EndL);
+  prefs.putInt("avance2EndR", p.avance2EndR);
+
+  prefs.end();
+}
+
+// ==================================================
+// PAGE HTML
+// ==================================================
+const char PAGE_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drawbot Control Panel</title>
+<style>
+:root {
+  --bg: #0f172a;
+  --card: #111827;
+  --panel: #020617;
+  --accent: #38bdf8;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f97316;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --border: #1f2937;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 1fr 330px;
+  min-height: 100vh;
+}
+
+main {
+  padding: 24px;
+}
+
+.sidebar {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: 20px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 28px;
+}
+
+.subtitle {
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 18px;
+}
+
+label {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+input {
+  width: 100%;
+  margin-top: 5px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #020617;
+  color: var(--text);
+  font-size: 15px;
+}
+
+button {
+  border: none;
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+  margin: 5px 0;
+  width: 100%;
+}
+
+.btn-blue { background: var(--accent); color: #00111d; }
+.btn-green { background: var(--green); }
+.btn-red { background: var(--red); }
+.btn-orange { background: var(--orange); }
+.btn-dark { background: #334155; }
+
+.status {
+  padding: 14px;
+  border-radius: 14px;
+  background: #0f172a;
+  border: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.status div {
+  margin-bottom: 7px;
+}
+
+.commands {
+  background: #020617;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  color: #a7f3d0;
+  height: 240px;
+  overflow-y: auto;
+}
+
+.manual-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.manual-grid button {
+  margin: 0;
+}
+
+@media(max-width: 900px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: relative;
+    height: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+</style>
+</head>
+<body>
+<div class="app">
+<main>
+  <h1>Drawbot Control Panel</h1>
+  <div class="subtitle">Réglage des distances, PWM et commandes du robot en temps réel</div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>1. Distances</h2>
+      <label>Distance ligne droite 1 — cm</label>
+      <input id="dist1" type="number" step="0.1">
+
+      <label>Distance du virage — cm</label>
+      <input id="turnDist" type="number" step="0.1">
+
+      <label>Distance ligne droite 2 — cm</label>
+      <input id="dist2" type="number" step="0.1">
+    </section>
+
+    <section class="card">
+      <h2>2. Avance 1 avec avance.h</h2>
+      <label>PWM vitesse normale</label>
+      <input id="cruisePwm" type="number">
+
+      <label>PWM ralentissement</label>
+      <input id="slowPwm" type="number">
+
+      <label>Zone de ralentissement — cm</label>
+      <input id="slowZone" type="number" step="0.1">
+
+      <label>Correction ligne droite KP</label>
+      <input id="kpStraight" type="number" step="0.01">
+    </section>
+
+    <section class="card">
+      <h2>3. Virage / coude</h2>
+      <label>Début virage PWM gauche</label>
+      <input id="turnStartL" type="number">
+
+      <label>Début virage PWM droite</label>
+      <input id="turnStartR" type="number">
+
+      <label>Fin virage PWM gauche</label>
+      <input id="turnEndL" type="number">
+
+      <label>Fin virage PWM droite</label>
+      <input id="turnEndR" type="number">
+    </section>
+
+    <section class="card">
+      <h2>4. Avance 2 corrigée</h2>
+      <label>Début avance 2 PWM gauche</label>
+      <input id="avance2StartL" type="number">
+
+      <label>Début avance 2 PWM droite</label>
+      <input id="avance2StartR" type="number">
+
+      <label>Fin avance 2 PWM gauche</label>
+      <input id="avance2EndL" type="number">
+
+      <label>Fin avance 2 PWM droite</label>
+      <input id="avance2EndR" type="number">
+    </section>
+  </div>
+</main>
+
+<aside class="sidebar">
+  <h2>Commandes robot</h2>
+
+  <div class="status">
+    <div><strong>État :</strong> <span id="state">---</span></div>
+    <div><strong>Distance G :</strong> <span id="distL">0</span> cm</div>
+    <div><strong>Distance D :</strong> <span id="distR">0</span> cm</div>
+    <div><strong>Distance moyenne :</strong> <span id="distAbs">0</span> cm</div>
+  </div>
+
+  <button class="btn-blue" onclick="sendConfig()">Appliquer les valeurs</button>
+  <button class="btn-green" onclick="saveConfig()">Enregistrer en mémoire</button>
+  <button class="btn-orange" onclick="cmd('/start')">START séquence</button>
+  <button class="btn-red" onclick="cmd('/stop')">STOP moteurs</button>
+  <button class="btn-dark" onclick="cmd('/reset')">RESET encodeurs</button>
+
+  <h2>Commande manuelle</h2>
+  <div class="manual-grid">
+    <div></div>
+    <button class="btn-dark" onclick="manual(180,180)">↑</button>
+    <div></div>
+
+    <button class="btn-dark" onclick="manual(-160,160)">←</button>
+    <button class="btn-red" onclick="manual(0,0)">■</button>
+    <button class="btn-dark" onclick="manual(160,-160)">→</button>
+
+    <div></div>
+    <button class="btn-dark" onclick="manual(-160,-160)">↓</button>
+    <div></div>
+  </div>
+
+  <h2>Commandes envoyées</h2>
+  <div id="log" class="commands"></div>
+</aside>
+</div>
+
+<script>
+const fields = [
+  "dist1", "turnDist", "dist2",
+  "cruisePwm", "slowPwm", "slowZone", "kpStraight",
+  "turnStartL", "turnStartR", "turnEndL", "turnEndR",
+  "avance2StartL", "avance2StartR", "avance2EndL", "avance2EndR"
+];
+
+function log(txt) {
+  const box = document.getElementById("log");
+  box.innerHTML = "> " + txt + "<br>" + box.innerHTML;
+}
+
+async function loadConfig() {
+  const res = await fetch("/api/config");
+  const data = await res.json();
+
+  fields.forEach(id => {
+    document.getElementById(id).value = data[id];
+  });
+
+  log("Configuration chargée");
+}
+
+async function sendConfig() {
+  const params = new URLSearchParams();
+
+  fields.forEach(id => {
+    params.append(id, document.getElementById(id).value);
+  });
+
+  await fetch("/api/set?" + params.toString());
+  log("Valeurs appliquées au robot");
+}
+
+async function saveConfig() {
+  await sendConfig();
+  await fetch("/api/save");
+  log("Configuration enregistrée en mémoire flash");
+}
+
+async function cmd(route) {
+  await fetch("/api" + route);
+  log("Commande envoyée : " + route);
+}
+
+async function manual(left, right) {
+  await fetch(`/api/manual?l=${left}&r=${right}`);
+  log(`Manuel : gauche=${left}, droite=${right}`);
+}
+
+async function refreshStatus() {
+  const res = await fetch("/api/status");
+  const data = await res.json();
+
+  document.getElementById("state").textContent = data.state;
+  document.getElementById("distL").textContent = data.distL.toFixed(2);
+  document.getElementById("distR").textContent = data.distR.toFixed(2);
+  document.getElementById("distAbs").textContent = data.distAbs.toFixed(2);
+}
+
+loadConfig();
+setInterval(refreshStatus, 300);
+</script>
+</body>
+</html>
+)rawliteral";
+
+// ==================================================
+// API WEB
+// ==================================================
+void handleRoot() {
+  server.send_P(200, "text/html", PAGE_HTML);
+}
+
+void handleConfig() {
+  String json = "{";
+  json += "\"dist1\":" + String(p.dist1) + ",";
+  json += "\"turnDist\":" + String(p.turnDist) + ",";
+  json += "\"dist2\":" + String(p.dist2) + ",";
+
+  json += "\"cruisePwm\":" + String(p.cruisePwm) + ",";
+  json += "\"slowPwm\":" + String(p.slowPwm) + ",";
+  json += "\"slowZone\":" + String(p.slowZone) + ",";
+  json += "\"kpStraight\":" + String(p.kpStraight) + ",";
+
+  json += "\"turnStartL\":" + String(p.turnStartL) + ",";
+  json += "\"turnStartR\":" + String(p.turnStartR) + ",";
+  json += "\"turnEndL\":" + String(p.turnEndL) + ",";
+  json += "\"turnEndR\":" + String(p.turnEndR) + ",";
+
+  json += "\"avance2StartL\":" + String(p.avance2StartL) + ",";
+  json += "\"avance2StartR\":" + String(p.avance2StartR) + ",";
+  json += "\"avance2EndL\":" + String(p.avance2EndL) + ",";
+  json += "\"avance2EndR\":" + String(p.avance2EndR);
+  json += "}";
+
+  server.send(200, "application/json", json);
+}
+
+void handleSet() {
+  if (server.hasArg("dist1")) p.dist1 = server.arg("dist1").toFloat();
+  if (server.hasArg("turnDist")) p.turnDist = server.arg("turnDist").toFloat();
+  if (server.hasArg("dist2")) p.dist2 = server.arg("dist2").toFloat();
+
+  if (server.hasArg("cruisePwm")) p.cruisePwm = server.arg("cruisePwm").toInt();
+  if (server.hasArg("slowPwm")) p.slowPwm = server.arg("slowPwm").toInt();
+  if (server.hasArg("slowZone")) p.slowZone = server.arg("slowZone").toFloat();
+  if (server.hasArg("kpStraight")) p.kpStraight = server.arg("kpStraight").toFloat();
+
+  if (server.hasArg("turnStartL")) p.turnStartL = server.arg("turnStartL").toInt();
+  if (server.hasArg("turnStartR")) p.turnStartR = server.arg("turnStartR").toInt();
+  if (server.hasArg("turnEndL")) p.turnEndL = server.arg("turnEndL").toInt();
+  if (server.hasArg("turnEndR")) p.turnEndR = server.arg("turnEndR").toInt();
+
+  if (server.hasArg("avance2StartL")) p.avance2StartL = server.arg("avance2StartL").toInt();
+  if (server.hasArg("avance2StartR")) p.avance2StartR = server.arg("avance2StartR").toInt();
+  if (server.hasArg("avance2EndL")) p.avance2EndL = server.arg("avance2EndL").toInt();
+  if (server.hasArg("avance2EndR")) p.avance2EndR = server.arg("avance2EndR").toInt();
+
+  server.send(200, "text/plain", "OK");
+}
+
+void handleStatus() {
+  String json = "{";
+  json += "\"state\":\"" + stateName() + "\",";
+  json += "\"distL\":" + String(getLeftDistanceCm(), 3) + ",";
+  json += "\"distR\":" + String(getRightDistanceCm(), 3) + ",";
+  json += "\"distAbs\":" + String(distAbs(), 3);
+  json += "}";
+
+  server.send(200, "application/json", json);
+}
+
+void handleStart() {
+  startSequence();
+  server.send(200, "text/plain", "START");
+}
+
+void handleStop() {
+  stopRobot();
+  server.send(200, "text/plain", "STOP");
+}
+
+void handleReset() {
+  resetRobot();
+  server.send(200, "text/plain", "RESET");
+}
+
+void handleSave() {
+  saveParams();
+  server.send(200, "text/plain", "SAVED");
+}
+
+void handleManual() {
+  int l = server.hasArg("l") ? server.arg("l").toInt() : 0;
+  int r = server.hasArg("r") ? server.arg("r").toInt() : 0;
+
+  state = MANUAL;
+  setMotors(l, r);
+
+  server.send(200, "text/plain", "MANUAL");
+}
+
+void setupWebServer() {
+  server.on("/", handleRoot);
+  server.on("/api/config", handleConfig);
+  server.on("/api/set", handleSet);
+  server.on("/api/status", handleStatus);
+  server.on("/api/start", handleStart);
+  server.on("/api/stop", handleStop);
+  server.on("/api/reset", handleReset);
+  server.on("/api/save", handleSave);
+  server.on("/api/manual", handleManual);
+
+  server.begin();
+}
+
+// ==================================================
+// TELEMETRIE SERIE
+// ==================================================
 void printTelemetry(unsigned long now) {
   if (now - lastPrint >= 200) {
     lastPrint = now;
 
     Serial.print("state=");
-    Serial.print(state);
+    Serial.print(stateName());
     Serial.print(" | L=");
     Serial.print(getLeftDistanceCm(), 2);
     Serial.print(" | R=");
     Serial.print(getRightDistanceCm(), 2);
     Serial.print(" | distAbs=");
-    Serial.print(distAbs(), 2);
-    Serial.print(" | theta=");
-    Serial.print(thetaRobot * 180.0 / PI, 2);
-    Serial.print(" | xPen=");
-    Serial.print(xPen, 2);
-    Serial.print(" | yPen=");
-    Serial.println(yPen, 2);
-
-    Serial.print(">state:");
-    Serial.println(state);
-
-    Serial.print(">distL:");
-    Serial.println(getLeftDistanceCm());
-
-    Serial.print(">distR:");
-    Serial.println(getRightDistanceCm());
-
-    Serial.print(">distAbs:");
-    Serial.println(distAbs());
-
-    Serial.print(">thetaDeg:");
-    Serial.println(thetaRobot * 180.0 / PI);
-
-    Serial.print(">xPen:");
-    Serial.println(xPen);
-
-    Serial.print(">yPen:");
-    Serial.println(yPen);
+    Serial.println(distAbs(), 2);
   }
 }
 
 // ==================================================
-// ================= WEB PAGE =======================
+// SETUP
 // ==================================================
-
-String htmlInput(String label, String name, String value) {
-  String s = "";
-  s += "<label>" + label + "</label><br>";
-  s += "<input name='" + name + "' value='" + value + "'><br><br>";
-  return s;
-}
-
-void handleRoot() {
-  String html = "";
-
-  html += "<!DOCTYPE html><html><head>";
-  html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-  html += "<style>";
-  html += "body{font-family:Arial;background:#111;color:white;margin:0;padding:20px 20px 20px 240px;}";
-  html += ".sidebar{position:fixed;left:0;top:0;width:220px;height:100vh;background:#181818;padding:15px;box-sizing:border-box;}";
-  html += ".content{max-width:900px;}";
-  html += "input{width:100%;padding:10px;font-size:18px;margin-top:5px;box-sizing:border-box;}";
-  html += "button,a{display:block;text-align:center;padding:14px;margin:10px 0;background:#2b7cff;color:white;text-decoration:none;border-radius:8px;border:0;font-size:18px;}";
-  html += ".stop{background:#d22;}";
-  html += ".card{background:#222;padding:15px;border-radius:10px;margin-bottom:15px;}";
-  html += "@media(max-width:700px){body{padding:170px 15px 15px 15px}.sidebar{width:100%;height:auto;}.sidebar a{display:inline-block;width:30%;margin:5px;}}";
-  html += "</style>";
-  html += "</head><body>";
-
-  html += "<div class='sidebar'>";
-  html += "<h2>Commandes</h2>";
-  html += "<a href='/go'>GO</a>";
-  html += "<a class='stop' href='/stop'>STOP</a>";
-  html += "<a href='/reset'>RESET</a>";
-  html += "</div>";
-
-  html += "<div class='content'>";
-  html += "<h1>Drawbot Reglages</h1>";
-
-  html += "<div class='card'>";
-  html += "<p>Etat : " + String(state) + "</p>";
-  html += "<p>distAbs : " + String(distAbs(), 2) + " cm</p>";
-  html += "<p>theta : " + String(thetaRobot * 180.0 / PI, 2) + " deg</p>";
-  html += "<p>xPen : " + String(xPen, 2) + " cm</p>";
-  html += "<p>yPen : " + String(yPen, 2) + " cm</p>";
-  html += "</div>";
-
-  html += "<form action='/set'>";
-
-  html += "<div class='card'>";
-  html += "<h2>Lignes droites</h2>";
-  html += htmlInput("Distance 1 cm", "dist1", String(dist1Cm));
-  html += htmlInput("Distance 2 cm", "dist2", String(dist2Cm));
-  html += htmlInput("Distance 3 cm", "dist3", String(dist3Cm));
-  html += htmlInput("Cruise PWM", "cruise", String(cruisePwm));
-  html += htmlInput("Slow PWM", "slow", String(slowPwm));
-  html += htmlInput("Slow zone cm", "slowzone", String(slowZoneCm));
-  html += htmlInput("KP straight", "kp", String(kpStraight));
-  html += "</div>";
-
-  html += "<div class='card'>";
-  html += "<h2>Virage gauche</h2>";
-  html += htmlInput("Distance debut doux gauche cm", "leftStartDist", String(leftTurnStartDistanceCm));
-  html += htmlInput("Distance arret virage gauche cm", "leftStopDist", String(leftTurnStopDistanceCm));
-  html += htmlInput("PWM gauche debut gauche", "leftStartL", String(leftTurnStartLeftPwm));
-  html += htmlInput("PWM droite debut gauche", "leftStartR", String(leftTurnStartRightPwm));
-  html += htmlInput("PWM gauche virage gauche", "leftTurnL", String(leftTurnLeftPwm));
-  html += htmlInput("PWM droite virage gauche", "leftTurnR", String(leftTurnRightPwm));
-  html += htmlInput("Angle gauche deg", "leftAngle", String(leftTargetAngleDeg));
-  html += "</div>";
-
-  html += "<div class='card'>";
-  html += "<h2>Virage droite</h2>";
-  html += htmlInput("Distance debut doux droite cm", "rightStartDist", String(rightTurnStartDistanceCm));
-  html += htmlInput("Distance arret virage droite cm", "rightStopDist", String(rightTurnStopDistanceCm));
-  html += htmlInput("PWM gauche debut droite", "rightStartL", String(rightTurnStartLeftPwm));
-  html += htmlInput("PWM droite debut droite", "rightStartR", String(rightTurnStartRightPwm));
-  html += htmlInput("PWM gauche virage droite", "rightTurnL", String(rightTurnLeftPwm));
-  html += htmlInput("PWM droite virage droite", "rightTurnR", String(rightTurnRightPwm));
-  html += htmlInput("Angle droite deg", "rightAngle", String(rightTargetAngleDeg));
-  html += "</div>";
-
-  html += "<div class='card'>";
-  html += "<h2>Robot</h2>";
-  html += htmlInput("Wheel base cm", "wheelbase", String(wheelBaseCm));
-  html += htmlInput("Pen offset cm", "penoffset", String(penOffsetCm));
-  html += "</div>";
-
-  html += "<button type='submit'>Enregistrer les reglages</button>";
-  html += "</form>";
-
-  html += "</div>";
-  html += "</body></html>";
-
-  server.send(200, "text/html", html);
-}
-
-void handleSet() {
-  if (server.hasArg("dist1")) dist1Cm = server.arg("dist1").toFloat();
-  if (server.hasArg("dist2")) dist2Cm = server.arg("dist2").toFloat();
-  if (server.hasArg("dist3")) dist3Cm = server.arg("dist3").toFloat();
-
-  if (server.hasArg("leftStartDist")) leftTurnStartDistanceCm = server.arg("leftStartDist").toFloat();
-  if (server.hasArg("leftStopDist")) leftTurnStopDistanceCm = server.arg("leftStopDist").toFloat();
-  if (server.hasArg("leftStartL")) leftTurnStartLeftPwm = server.arg("leftStartL").toInt();
-  if (server.hasArg("leftStartR")) leftTurnStartRightPwm = server.arg("leftStartR").toInt();
-  if (server.hasArg("leftTurnL")) leftTurnLeftPwm = server.arg("leftTurnL").toInt();
-  if (server.hasArg("leftTurnR")) leftTurnRightPwm = server.arg("leftTurnR").toInt();
-
-  if (server.hasArg("rightStartDist")) rightTurnStartDistanceCm = server.arg("rightStartDist").toFloat();
-  if (server.hasArg("rightStopDist")) rightTurnStopDistanceCm = server.arg("rightStopDist").toFloat();
-  if (server.hasArg("rightStartL")) rightTurnStartLeftPwm = server.arg("rightStartL").toInt();
-  if (server.hasArg("rightStartR")) rightTurnStartRightPwm = server.arg("rightStartR").toInt();
-  if (server.hasArg("rightTurnL")) rightTurnLeftPwm = server.arg("rightTurnL").toInt();
-  if (server.hasArg("rightTurnR")) rightTurnRightPwm = server.arg("rightTurnR").toInt();
-
-  if (server.hasArg("cruise")) cruisePwm = server.arg("cruise").toInt();
-  if (server.hasArg("slow")) slowPwm = server.arg("slow").toInt();
-  if (server.hasArg("slowzone")) slowZoneCm = server.arg("slowzone").toFloat();
-  if (server.hasArg("kp")) kpStraight = server.arg("kp").toFloat();
-
-  if (server.hasArg("wheelbase")) wheelBaseCm = server.arg("wheelbase").toFloat();
-  if (server.hasArg("penoffset")) penOffsetCm = server.arg("penoffset").toFloat();
-
-  if (server.hasArg("leftAngle")) leftTargetAngleDeg = server.arg("leftAngle").toFloat();
-  if (server.hasArg("rightAngle")) rightTargetAngleDeg = server.arg("rightAngle").toFloat();
-
-  Serial.println("Reglages mis a jour");
-
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleGo() {
-  stopMotors();
-
-  resetEncoders();
-
-  state = START;
-
-  Serial.println("GO depuis page web");
-
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleStop() {
-  stopMotors();
-  state = FINISHED;
-
-  Serial.println("STOP depuis page web");
-
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-void handleReset() {
-  resetEncoders();
-  resetOdometry();
-
-  Serial.println("Reset odometrie depuis page web");
-
-  server.sendHeader("Location", "/");
-  server.send(303);
-}
-
-// ==================================================
-// ================= SETUP ==========================
-// ==================================================
-
 void setup() {
   Serial.begin(115200);
 
@@ -361,137 +644,98 @@ void setup() {
 
   initMotors();
   initEncoders();
-
   resetEncoders();
-  resetOdometry();
 
-  delay(1000);
-
-  Serial.println("=== DRAWBOT WIFI CONTROL ===");
+  loadParams();
 
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(apSsid, apPassword);
+  WiFi.softAP(AP_SSID, AP_PASS);
 
-  Serial.print("WiFi cree : ");
-  Serial.println(apSsid);
-
-  Serial.print("IP : ");
+  Serial.println("=== DRAWBOT WEB CONTROL ===");
+  Serial.print("WiFi : ");
+  Serial.println(AP_SSID);
+  Serial.print("Mot de passe : ");
+  Serial.println(AP_PASS);
+  Serial.print("Adresse page web : http://");
   Serial.println(WiFi.softAPIP());
 
-  server.on("/", handleRoot);
-  server.on("/set", handleSet);
-  server.on("/go", handleGo);
-  server.on("/stop", handleStop);
-  server.on("/reset", handleReset);
-
-  server.begin();
-
-  Serial.println("Serveur web lance");
+  setupWebServer();
 
   lastEncoderUpdate = millis();
   lastPrint = millis();
 }
 
 // ==================================================
-// ================= LOOP ===========================
+// LOOP
 // ==================================================
-
 void loop() {
   unsigned long now = millis();
 
   server.handleClient();
-
   updateEncoderTask(now);
   printTelemetry(now);
 
   switch (state) {
-    case START:
-      Serial.println("PHASE 1 : AVANCE 1");
-
-      resetEncoders();
-      resetOdometry();
-
-      startAvanceForwardDistance(
-        dist1Cm,
-        cruisePwm,
-        slowPwm,
-        slowZoneCm,
-        kpStraight
-      );
-
-      state = AVANCE_1;
+    case IDLE:
+      stopMotors();
       break;
 
     case AVANCE_1:
       updateAvance(now);
 
       if (isAvanceTermine()) {
-        resetEncoders();
+        stopMotors();
+        delay(10);
 
-        Serial.println("PHASE 2 : ANGLE GAUCHE");
-        state = TURN_LEFT;
+        resetEncoders();
+        Serial.println("PHASE 2 : COUDE");
+        state = TURN_CURVE;
       }
       break;
 
-    case TURN_LEFT: {
+    case TURN_CURVE: {
       float d = distAbs();
 
-      if (d < leftTurnStartDistanceCm) {
-        setMotors(leftTurnStartLeftPwm, leftTurnStartRightPwm);
+      if (d < 1.0) {
+        setMotors(p.turnStartL, p.turnStartR);
       } else {
-        setMotors(leftTurnLeftPwm, leftTurnRightPwm);
+        setMotors(p.turnEndL, p.turnEndR);
       }
 
-      if (d >= leftTurnStopDistanceCm) {
-        resetEncoders();
+      if (d >= p.turnDist) {
+        stopMotors();
+        delay(10);
 
-        startAvanceForwardDistance(dist2Cm, cruisePwm, slowPwm, slowZoneCm, kpStraight);
+        resetEncoders();
+        Serial.println("PHASE 3 : AVANCE 2");
         state = AVANCE_2;
       }
       break;
     }
 
-    case AVANCE_2:
-      updateAvance(now);
-
-      if (isAvanceTermine()) {
-        resetEncoders();
-
-        Serial.println("PHASE 4 : VIRAGE A DROITE");
-        state = TURN_RIGHT;
-      }
-      break;
-
-    case TURN_RIGHT: {
+    case AVANCE_2: {
       float d = distAbs();
 
-      if (d < rightTurnStartDistanceCm) {
-        setMotors(rightTurnStartLeftPwm, rightTurnStartRightPwm);
+      if (d < 1.0) {
+        setMotors(p.avance2StartL, p.avance2StartR);
       } else {
-        setMotors(rightTurnLeftPwm, rightTurnRightPwm);
+        setMotors(p.avance2EndL, p.avance2EndR);
       }
 
-      if (d >= rightTurnStopDistanceCm) {
-        resetEncoders();
-
-        startAvanceForwardDistance(dist3Cm, cruisePwm, slowPwm, slowZoneCm, kpStraight);
-        state = AVANCE_3;
-      }
-      break;
-    }
-
-    case AVANCE_3:
-      updateAvance(now);
-
-      if (isAvanceTermine()) {
+      if (d >= p.dist2) {
         stopMotors();
         Serial.println("SEQUENCE TERMINEE");
         state = FINISHED;
       }
       break;
+    }
 
     case FINISHED:
       stopMotors();
+      break;
+
+    case MANUAL:
+      // Les moteurs restent avec la dernière commande manuelle.
       break;
   }
 }

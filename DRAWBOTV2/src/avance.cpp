@@ -62,6 +62,7 @@ void startAvanceForwardDistance(float targetCm, int cruisePwm, int slowPwm, floa
 // ==================================================
 void updateAvance(unsigned long now) {
   switch (avanceState) {
+
     case AVANCE_IDLE:
       stopMotors();
       leftCommand = 0;
