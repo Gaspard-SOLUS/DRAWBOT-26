@@ -62,36 +62,26 @@ void startAvanceForwardDistance(float targetCm, int cruisePwm, int slowPwm, floa
 // ==================================================
 void updateAvance(unsigned long now) {
   switch (avanceState) {
-
     case AVANCE_IDLE:
-      stopMotors();
-      leftCommand = 0;
-      rightCommand = 0;
       break;
 
     case AVANCE_RUNNING: {
       float distanceCm = getAverageDistanceCm();
       float remainingCm = avanceTargetCm - distanceCm;
 
-      // cible atteinte -> freinage
       if (remainingCm <= 0.0f) {
-        brakeMotors();
-        brakeStartTime = now;
-        avanceState = AVANCE_BRAKING;
+        avanceState = AVANCE_FINISHED;
         leftCommand = 0;
         rightCommand = 0;
         return;
       }
 
-      // Choix du PWM de base
       int basePwm = (remainingCm <= avanceSlowZoneCm) ? avanceSlowPwm : avanceCruisePwm;
 
-      // Erreur de ligne droite
       long leftTicks = getLeftEncoderTicks();
       long rightTicks = getRightEncoderTicks();
       straightErrorTicks = static_cast<float>(leftTicks - rightTicks);
 
-      // Correction proportionnelle
       float correction = avanceKpStraight * straightErrorTicks;
 
       int cmdLeft = basePwm - static_cast<int>(correction);
@@ -108,18 +98,10 @@ void updateAvance(unsigned long now) {
     }
 
     case AVANCE_BRAKING:
-      brakeMotors();
-
-      if (now - brakeStartTime >= BRAKE_TIME_MS) {
-        stopMotors();
-        avanceState = AVANCE_FINISHED;
-      }
+      avanceState = AVANCE_FINISHED;
       break;
 
     case AVANCE_FINISHED:
-      stopMotors();
-      leftCommand = 0;
-      rightCommand = 0;
       break;
   }
 }
