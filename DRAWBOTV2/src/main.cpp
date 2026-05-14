@@ -15,8 +15,8 @@
 // ==================================================
 // WIFI POINT D'ACCES ESP32
 // ==================================================
-const char* DRAWBOT_AP_SSID = "DRAWBOT_ESP32";
-const char* DRAWBOT_AP_PASS = "12345678";
+const char* DRAWBOT_AP_SSID = "DRAWBOT_#S4S25-G-2314";
+const char* DRAWBOT_AP_PASS = "!12345678!";
 
 WebServer server(80);
 
