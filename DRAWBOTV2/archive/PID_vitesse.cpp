@@ -1,7 +1,7 @@
 #include <Arduino.h>
-#include "include/pid_vitesse.h"
-#include "include/encodeurs.h"
-#include "include/moteurs.h"
+#include "PID_vitesse.h"
+#include "encodeurs.h"
+#include "moteurs.h"
 
 // ==================================================
 // ================= PARAMETRES PID ==================

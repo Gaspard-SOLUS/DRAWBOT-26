@@ -1,6 +1,6 @@
 #include <Arduino.h>
-#include "include/pins.h"
-#include "include/moteurs.h"
+#include "pins.h"
+#include "moteurs.h"
 
 // Réglages PWM
 static const int PWM_FREQ = 20000;// 20 kHz

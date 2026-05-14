@@ -1,7 +1,7 @@
 #include <Arduino.h>
-#include "include/pins.h"
-#include "include/encodeurs.h"
-#include "include/robot.h"
+#include "pins.h"
+#include "encodeurs.h"
+#include "robot.h"
 
 // Compteurs encodeurs
 volatile long leftTicks = 0;

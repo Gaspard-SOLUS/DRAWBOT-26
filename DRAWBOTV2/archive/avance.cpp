@@ -1,7 +1,7 @@
 #include <Arduino.h>
-#include "include/avance.h"
-#include "include/moteurs.h"
-#include "include/encodeurs.h"
+#include "avance.h"
+#include "moteurs.h"
+#include "encodeurs.h"
 
 // ==================================================
 // ================= ETAT INTERNE ===================

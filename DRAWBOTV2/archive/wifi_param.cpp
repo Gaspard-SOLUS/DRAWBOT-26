@@ -2,10 +2,10 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
-#include "include/wifi_param.h"
-#include "include/encodeurs.h"
-#include "include/pid_vitesse.h"
-#include "include/moteurs.h"
+#include "wifi_param.h"
+#include "encodeurs.h"
+#include "PID_vitesse.h"
+#include "moteurs.h"
 
 // ================= WIFI =================
 const char* ssid = "SFR-8e1e";
