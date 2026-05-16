@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <Preferences.h>
 #include <Adafruit_LIS3MDL.h>
 #include <Adafruit_Sensor.h>
 #include <math.h>
@@ -26,7 +27,15 @@ static const uint8_t REG_OUTX_L_XL = 0x28;
 // ==================================================
 static Adafruit_LIS3MDL lis3mdl;
 
-// Calibration magnétomètre
+// ==================================================
+// MEMOIRE FLASH POUR CALIBRATION
+// ==================================================
+static Preferences magPrefs;
+static const char* MAG_PREF_NAMESPACE = "mag_calib";
+
+// ==================================================
+// CALIBRATION MAGNETOMETRE
+// ==================================================
 static unsigned long magCalibStart = 0;
 static const unsigned long MAG_CALIB_DURATION_MS = 20000;
 
@@ -35,17 +44,13 @@ static float magMaxX = -1e9;
 static float magMinY =  1e9;
 static float magMaxY = -1e9;
 
-static float magOffsetX = 0.0f;
-static float magOffsetY = 0.0f;
-
-static float magScaleX = 1.0f;
-static float magScaleY = 1.0f;
-
-// Gyroscope intégré
+// ==================================================
+// GYROSCOPE INTEGRE
+// ==================================================
 static unsigned long lastImuTime = 0;
 
 // ==================================================
-// OUTILS I2C BAS NIVEAU POUR LE LSM6DS3
+// OUTILS I2C BAS NIVEAU POUR LSM6DS3
 // ==================================================
 static void writeRegister(uint8_t address, uint8_t reg, uint8_t value) {
   Wire.beginTransmission(address);
@@ -90,7 +95,78 @@ static int16_t readInt16(uint8_t address, uint8_t regLow) {
 }
 
 // ==================================================
-// FONCTIONS INTERNES IMU
+// SAUVEGARDE / CHARGEMENT CALIBRATION MAGNETOMETRE
+// ==================================================
+static void loadMagCalibration() {
+  magPrefs.begin(MAG_PREF_NAMESPACE, true);
+
+  bool valid = magPrefs.getBool("valid", false);
+
+  if (valid) {
+    sensorState.magOffsetX = magPrefs.getFloat("offsetX", 0.0f);
+    sensorState.magOffsetY = magPrefs.getFloat("offsetY", 0.0f);
+    sensorState.magScaleX = magPrefs.getFloat("scaleX", 1.0f);
+    sensorState.magScaleY = magPrefs.getFloat("scaleY", 1.0f);
+
+    sensorState.magCalibrationLoaded = true;
+    sensorState.magCalibrationDone = true;
+
+    Logger::log("Calibration magnetometre chargee depuis la memoire flash");
+    Logger::log("offsetX=" + String(sensorState.magOffsetX, 2) +
+                " offsetY=" + String(sensorState.magOffsetY, 2));
+    Logger::log("scaleX=" + String(sensorState.magScaleX, 4) +
+                " scaleY=" + String(sensorState.magScaleY, 4));
+  } else {
+    sensorState.magOffsetX = 0.0f;
+    sensorState.magOffsetY = 0.0f;
+    sensorState.magScaleX = 1.0f;
+    sensorState.magScaleY = 1.0f;
+
+    sensorState.magCalibrationLoaded = false;
+    sensorState.magCalibrationDone = false;
+
+    Logger::log("Aucune calibration magnetometre sauvegardee");
+  }
+
+  magPrefs.end();
+}
+
+static void saveMagCalibration() {
+  magPrefs.begin(MAG_PREF_NAMESPACE, false);
+
+  magPrefs.putBool("valid", true);
+  magPrefs.putFloat("offsetX", sensorState.magOffsetX);
+  magPrefs.putFloat("offsetY", sensorState.magOffsetY);
+  magPrefs.putFloat("scaleX", sensorState.magScaleX);
+  magPrefs.putFloat("scaleY", sensorState.magScaleY);
+
+  magPrefs.end();
+
+  sensorState.magCalibrationLoaded = true;
+  sensorState.magCalibrationDone = true;
+
+  Logger::log("Calibration magnetometre enregistree en memoire flash");
+}
+
+static void eraseMagCalibration() {
+  magPrefs.begin(MAG_PREF_NAMESPACE, false);
+  magPrefs.clear();
+  magPrefs.end();
+
+  sensorState.magOffsetX = 0.0f;
+  sensorState.magOffsetY = 0.0f;
+  sensorState.magScaleX = 1.0f;
+  sensorState.magScaleY = 1.0f;
+
+  sensorState.magCalibrationLoaded = false;
+  sensorState.magCalibrationDone = false;
+  sensorState.magCalibrationRunning = false;
+
+  Logger::log("Calibration magnetometre effacee");
+}
+
+// ==================================================
+// IMU LSM6DS3
 // ==================================================
 static bool initIMU() {
   uint8_t whoami = readRegister(LSM6DS3_ADDR, REG_WHO_AM_I);
@@ -100,19 +176,13 @@ static bool initIMU() {
     return false;
   }
 
-  // CTRL3_C :
-  // BDU = 1 : bloque la mise à jour des registres pendant la lecture
-  // IF_INC = 1 : incrément automatique de l'adresse des registres
+  // BDU = 1, IF_INC = 1
   writeRegister(LSM6DS3_ADDR, REG_CTRL3_C, 0b01000100);
 
-  // Accelerometre :
-  // ODR = 104 Hz
-  // FS = ±2g
+  // Accelerometre : 104 Hz, ±2g
   writeRegister(LSM6DS3_ADDR, REG_CTRL1_XL, 0b01000000);
 
-  // Gyroscope :
-  // ODR = 104 Hz
-  // FS = 245 dps
+  // Gyroscope : 104 Hz, 245 dps
   writeRegister(LSM6DS3_ADDR, REG_CTRL2_G, 0b01000000);
 
   Logger::log("LSM6DS3 detecte et initialise");
@@ -132,14 +202,12 @@ static void readIMU() {
   int16_t ayRaw = readInt16(LSM6DS3_ADDR, REG_OUTX_L_XL + 2);
   int16_t azRaw = readInt16(LSM6DS3_ADDR, REG_OUTX_L_XL + 4);
 
-  // Accelerometre ±2g :
-  // Sensibilité = 0.061 mg/LSB = 0.000061 g/LSB
+  // ±2g : 0.061 mg/LSB = 0.000061 g/LSB
   sensorState.accX = axRaw * 0.000061f;
   sensorState.accY = ayRaw * 0.000061f;
   sensorState.accZ = azRaw * 0.000061f;
 
-  // Gyroscope 245 dps :
-  // Sensibilité = 8.75 mdps/LSB = 0.00875 °/s/LSB
+  // 245 dps : 8.75 mdps/LSB = 0.00875 °/s/LSB
   sensorState.gyroX = gxRaw * 0.00875f;
   sensorState.gyroY = gyRaw * 0.00875f;
   sensorState.gyroZ = gzRaw * 0.00875f;
@@ -163,7 +231,7 @@ static void updateGyroYaw(unsigned long now) {
 }
 
 // ==================================================
-// FONCTIONS INTERNES MAGNETOMETRE
+// MAGNETOMETRE LIS3MDL
 // ==================================================
 static void initMagnetometer() {
   sensorState.magOk = lis3mdl.begin_I2C(0x1E);
@@ -179,6 +247,8 @@ static void initMagnetometer() {
   lis3mdl.setRange(LIS3MDL_RANGE_4_GAUSS);
 
   Logger::log("LIS3MDL detecte et initialise");
+
+  loadMagCalibration();
 }
 
 static void readMagnetometer() {
@@ -194,49 +264,42 @@ static void readMagnetometer() {
   float rawZ = event.magnetic.z;
 
   if (sensorState.magCalibrationRunning) {
-    if (rawX < magMinX) {
-      magMinX = rawX;
-    }
-
-    if (rawX > magMaxX) {
-      magMaxX = rawX;
-    }
-
-    if (rawY < magMinY) {
-      magMinY = rawY;
-    }
-
-    if (rawY > magMaxY) {
-      magMaxY = rawY;
-    }
+    if (rawX < magMinX) magMinX = rawX;
+    if (rawX > magMaxX) magMaxX = rawX;
+    if (rawY < magMinY) magMinY = rawY;
+    if (rawY > magMaxY) magMaxY = rawY;
 
     if (millis() - magCalibStart >= MAG_CALIB_DURATION_MS) {
-      magOffsetX = (magMaxX + magMinX) * 0.5f;
-      magOffsetY = (magMaxY + magMinY) * 0.5f;
+      sensorState.magOffsetX = (magMaxX + magMinX) * 0.5f;
+      sensorState.magOffsetY = (magMaxY + magMinY) * 0.5f;
 
       float radiusX = (magMaxX - magMinX) * 0.5f;
       float radiusY = (magMaxY - magMinY) * 0.5f;
       float avgRadius = (radiusX + radiusY) * 0.5f;
 
       if (radiusX > 0.001f) {
-        magScaleX = avgRadius / radiusX;
+        sensorState.magScaleX = avgRadius / radiusX;
       }
 
       if (radiusY > 0.001f) {
-        magScaleY = avgRadius / radiusY;
+        sensorState.magScaleY = avgRadius / radiusY;
       }
 
       sensorState.magCalibrationRunning = false;
       sensorState.magCalibrationDone = true;
 
       Logger::log("Calibration magnetometre terminee");
-      Logger::log("offsetX=" + String(magOffsetX, 2) + " offsetY=" + String(magOffsetY, 2));
-      Logger::log("scaleX=" + String(magScaleX, 4) + " scaleY=" + String(magScaleY, 4));
+      Logger::log("offsetX=" + String(sensorState.magOffsetX, 2) +
+                  " offsetY=" + String(sensorState.magOffsetY, 2));
+      Logger::log("scaleX=" + String(sensorState.magScaleX, 4) +
+                  " scaleY=" + String(sensorState.magScaleY, 4));
+
+      saveMagCalibration();
     }
   }
 
-  sensorState.magX = (rawX - magOffsetX) * magScaleX;
-  sensorState.magY = (rawY - magOffsetY) * magScaleY;
+  sensorState.magX = (rawX - sensorState.magOffsetX) * sensorState.magScaleX;
+  sensorState.magY = (rawY - sensorState.magOffsetY) * sensorState.magScaleY;
   sensorState.magZ = rawZ;
 
   sensorState.headingMagDeg = atan2(-sensorState.magX, -sensorState.magY) * 180.0f / PI;
@@ -244,7 +307,7 @@ static void readMagnetometer() {
 }
 
 // ==================================================
-// API PUBLIQUE DU MODULE SENSORS
+// API PUBLIQUE
 // ==================================================
 namespace Sensors {
 
@@ -254,9 +317,6 @@ namespace Sensors {
 
     sensorState.yawGyroDeg = 0.0f;
     lastImuTime = 0;
-
-    sensorState.magCalibrationRunning = false;
-    sensorState.magCalibrationDone = false;
 
     Logger::log("Module capteurs initialise");
   }
@@ -284,6 +344,7 @@ namespace Sensors {
 
     sensorState.magCalibrationRunning = true;
     sensorState.magCalibrationDone = false;
+    sensorState.magCalibrationLoaded = false;
 
     magCalibStart = millis();
 
@@ -294,6 +355,10 @@ namespace Sensors {
 
     Logger::log("Calibration magnetometre demarree pour 20 secondes");
     Logger::log("Tourner le robot a plat sur lui-meme pendant la calibration");
+  }
+
+  void clearMagCalibration() {
+    eraseMagCalibration();
   }
 
   float normalizeAngleDeg(float angle) {

@@ -29,6 +29,12 @@ struct SensorState {
 
   bool magCalibrationRunning = false;
   bool magCalibrationDone = false;
+  bool magCalibrationLoaded = false;
+
+  float magOffsetX = 0.0f;
+  float magOffsetY = 0.0f;
+  float magScaleX = 1.0f;
+  float magScaleY = 1.0f;
 };
 
 struct OdometryState {

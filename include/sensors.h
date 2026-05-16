@@ -6,7 +6,9 @@ namespace Sensors {
   void update(unsigned long now, float dt);
 
   void resetGyroYaw();
+
   void startMagCalibration();
+  void clearMagCalibration();
 
   float normalizeAngleDeg(float angle);
 }

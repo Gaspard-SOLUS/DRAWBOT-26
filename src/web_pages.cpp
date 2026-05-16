@@ -90,6 +90,7 @@ button {
 .btn-red { background:var(--red); }
 .btn-orange { background:var(--orange); }
 .btn-dark { background:#334155; }
+.btn-purple { background:var(--purple); color:white; }
 .manual-grid {
   display:grid;
   grid-template-columns:repeat(3, 80px);
@@ -257,7 +258,7 @@ refreshLogs();
 
   <br>
   <button class="btn-red" onclick="api('/api/stop')">STOP moteurs</button>
-  <button class="btn-blue" onclick="api('/api/reset-encoders')">RESET encodeurs</button>
+  <button class="btn-blue" onclick="api('/api/reset-encoders')">RESET encodeurs</button><br><br>
   <button class="btn-blue" onclick="api('/api/reset-imu')">RESET IMU</button>
 </section>
 )rawliteral";
@@ -271,7 +272,7 @@ refreshLogs();
   <h1>Drawbot - Interface principale</h1>
   <p class="subtitle">
     Interface de contrôle du robot Drawbot : pilotage manuel, mesures capteurs,
-    odométrie, Teleplot et préparation soutenance 2.
+    odométrie, Teleplot et soutenance 2.
   </p>
 
   <div class="grid">
@@ -292,7 +293,7 @@ refreshLogs();
 
     <section class="card">
       <h2>Accès rapides</h2>
-      <p>Utilise ces pages pour présenter chaque étape du projet.</p>
+      <p>Acceder à chaque étape du projet.</p>
       <p><a href="/soutenance1">→ Page soutenance 1 : tests unitaires</a></p>
       <p><a href="/soutenance2">→ Page soutenance 2 : séquences finales</a></p>
     </section>
@@ -377,48 +378,333 @@ refreshLogs();
     String html = commonHead("Drawbot - Soutenance 2");
 
     html += R"rawliteral(
-<main>
-  <h1>Soutenance 2 - Séquences finales</h1>
-  <p class="subtitle">
-    Page prévue pour intégrer les séquences finales : escalier, cercle,
-    rose des vents, paramètres, lancement et validation.
-  </p>
+  <main>
+    <h1>Soutenance 2 - Séquences finales</h1>
+    <p class="subtitle">
+      Cette page regroupe les trois séquences finales du cahier des charges.
+    </p>
 
-  <div class="grid">
-)rawliteral";
+    <div class="grid">
+      <section class="card">
+        <h2>Séquence 1 : l'escalier</h2>
+        <p>
+          Objectif : avancer, tourner à gauche, avancer, tourner à droite,
+          puis avancer à nouveau afin de dessiner un escalier.
+        </p>
+        <p>
+          Contraintes : distances précises et angles proches de 90°.
+        </p>
+        <a href="/soutenance2/escalier">
+          <button class="btn-orange">Ouvrir la page escalier</button>
+        </a>
+      </section>
 
-    html += manualControls();
+      <section class="card">
+        <h2>Séquence 2 : le cercle</h2>
+        <p>
+          Objectif : dessiner un cercle dont le rayon est paramétrable
+          depuis l'interface web.
+        </p>
+        <p>
+          Rayon demandé entre 2 cm et 20 cm.
+        </p>
+        <a href="/soutenance2/cercle">
+          <button class="btn-green">Ouvrir la page cercle</button>
+        </a>
+      </section>
 
-    html += R"rawliteral(
-    <section class="card">
-      <h2>Zone de développement soutenance 2</h2>
-      <p>
-        Ici tu pourras ajouter les boutons de lancement des séquences :
-        escalier, cercle paramétrable, rose des vents, etc.
-      </p>
-      <button class="btn-orange" onclick="api('/api/s2/test')">Test soutenance 2</button>
-    </section>
+      <section class="card">
+        <h2>Séquence 3 : rose des vents</h2>
+        <p>
+          Objectif : dessiner une flèche ou une rose des vents orientée
+          vers le Nord terrestre grâce au magnétomètre.
+        </p>
+        <p>
+          Cette séquence utilise la calibration magnétomètre.
+        </p>
+        <a href="/soutenance2/rose-des-vents">
+          <button class="btn-purple">Ouvrir la page rose des vents</button>
+        </a>
+      </section>
 
-    <section class="card">
-      <h2>État robot</h2>
-      <div class="value"><span>État</span><span id="state">---</span></div>
-      <div class="value"><span>Mode</span><span id="mode">---</span></div>
-      <div class="value"><span>PWM gauche</span><span id="pwmL">---</span></div>
-      <div class="value"><span>PWM droite</span><span id="pwmR">---</span></div>
-      <div class="value"><span>X</span><span id="odoX">---</span></div>
-      <div class="value"><span>Y</span><span id="odoY">---</span></div>
-      <div class="value"><span>Theta</span><span id="odoTheta">---</span></div>
-    </section>
+      <section class="card">
+        <h2>État robot</h2>
+        <div class="value"><span>État</span><span id="state">---</span></div>
+        <div class="value"><span>Mode</span><span id="mode">---</span></div>
+        <div class="value"><span>PWM gauche</span><span id="pwmL">---</span></div>
+        <div class="value"><span>PWM droite</span><span id="pwmR">---</span></div>
+        <div class="value"><span>X</span><span id="odoX">---</span></div>
+        <div class="value"><span>Y</span><span id="odoY">---</span></div>
+        <div class="value"><span>Theta</span><span id="odoTheta">---</span></div>
+      </section>
 
-    <section class="card">
-      <h2>Console ESP32</h2>
-      <div id="console" class="console">Chargement...</div>
-    </section>
-  </div>
-</main>
-)rawliteral";
+      <section class="card">
+        <h2>Console ESP32</h2>
+        <div id="console" class="console">Chargement...</div>
+      </section>
+    </div>
+  </main>
+  )rawliteral";
 
     html += commonScript();
+    html += "</body></html>";
+    return html;
+  }
+
+  String soutenance2Escalier() {
+    String html = commonHead("Drawbot - Séquence escalier");
+
+    html += R"rawliteral(
+  <main>
+    <h1>Soutenance 2 - Séquence 1 : l'escalier</h1>
+    <p class="subtitle">
+      Réglage et lancement de la séquence escalier.
+    </p>
+
+    <p>
+      <a href="/soutenance2">← Retour soutenance 2</a>
+    </p>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Paramètres escalier</h2>
+
+        <label>Distance 1 en cm</label>
+        <input id="stairDist1" type="number" value="20" step="0.1"><br>
+
+        <label>Angle gauche en degrés</label>
+        <input id="stairAngleLeft" type="number" value="90" step="1"><br>
+
+        <label>Distance 2 en cm</label>
+        <input id="stairDist2" type="number" value="10" step="0.1"><br>
+
+        <label>Angle droite en degrés</label>
+        <input id="stairAngleRight" type="number" value="90" step="1"><br>
+
+        <label>Distance 3 en cm</label>
+        <input id="stairDist3" type="number" value="40" step="0.1">
+
+        <br><br>
+        <button class="btn-green" onclick="startStair()">Lancer escalier</button>
+        <button class="btn-red" onclick="api('/api/stop')">STOP</button>
+        <button class="btn-blue" onclick="api('/api/reset-encoders')">RESET odométrie</button>
+      </section>
+
+      <section class="card">
+        <h2>État robot</h2>
+        <div class="value"><span>État</span><span id="state">---</span></div>
+        <div class="value"><span>Mode</span><span id="mode">---</span></div>
+        <div class="value"><span>PWM gauche</span><span id="pwmL">---</span></div>
+        <div class="value"><span>PWM droite</span><span id="pwmR">---</span></div>
+        <div class="value"><span>X</span><span id="odoX">---</span></div>
+        <div class="value"><span>Y</span><span id="odoY">---</span></div>
+        <div class="value"><span>Theta</span><span id="odoTheta">---</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Console ESP32</h2>
+        <div id="console" class="console">Chargement...</div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+  async function startStair() {
+    const params = new URLSearchParams();
+    params.append("d1", document.getElementById("stairDist1").value);
+    params.append("aL", document.getElementById("stairAngleLeft").value);
+    params.append("d2", document.getElementById("stairDist2").value);
+    params.append("aR", document.getElementById("stairAngleRight").value);
+    params.append("d3", document.getElementById("stairDist3").value);
+
+    await fetch("/api/s2/escalier/start?" + params.toString());
+  }
+  </script>
+  )rawliteral";
+
+    html += commonScript();
+    html += "</body></html>";
+    return html;
+  }
+
+  String soutenance2Cercle() {
+    String html = commonHead("Drawbot - Séquence cercle");
+
+    html += R"rawliteral(
+  <main>
+    <h1>Soutenance 2 - Séquence 2 : cercle</h1>
+    <p class="subtitle">
+      Réglage du rayon et lancement du tracé du cercle.
+    </p>
+
+    <p>
+      <a href="/soutenance2">← Retour soutenance 2</a>
+    </p>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Paramètres cercle</h2>
+
+        <label>Rayon demandé en cm</label>
+        <input id="circleRadius" type="number" value="10" min="2" max="20" step="0.1"><br>
+
+        <label>Nombre de segments si approximation polygonale</label>
+        <input id="circleSegments" type="number" value="36" min="12" max="96" step="1"><br>
+
+        <label>PWM de base</label>
+        <input id="circlePwm" type="number" value="170" min="80" max="255" step="1">
+
+        <br><br>
+        <button class="btn-green" onclick="startCircle()">Lancer cercle</button>
+        <button class="btn-red" onclick="api('/api/stop')">STOP</button><br>
+        <button class="btn-blue" onclick="api('/api/reset-encoders')">RESET odométrie</button>
+      </section>
+
+      <section class="card">
+        <h2>Informations géométriques</h2>
+        <p>
+          Le stylo est décalé par rapport à l'axe des roues. La stratégie dépend
+          donc du rayon demandé.
+        </p>
+        <div class="value"><span>Rayon minimum continu</span><span>≈ 13 cm</span></div>
+        <div class="value"><span>Écartement roues</span><span>8.3 cm</span></div>
+        <div class="value"><span>Offset stylo</span><span>13 cm</span></div>
+      </section>
+
+      <section class="card">
+        <h2>État robot</h2>
+        <div class="value"><span>État</span><span id="state">---</span></div>
+        <div class="value"><span>Mode</span><span id="mode">---</span></div>
+        <div class="value"><span>X</span><span id="odoX">---</span></div>
+        <div class="value"><span>Y</span><span id="odoY">---</span></div>
+        <div class="value"><span>Theta</span><span id="odoTheta">---</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Console ESP32</h2>
+        <div id="console" class="console">Chargement...</div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+  async function startCircle() {
+    const params = new URLSearchParams();
+    params.append("r", document.getElementById("circleRadius").value);
+    params.append("n", document.getElementById("circleSegments").value);
+    params.append("pwm", document.getElementById("circlePwm").value);
+
+    await fetch("/api/s2/cercle/start?" + params.toString());
+  }
+  </script>
+  )rawliteral";
+
+    html += commonScript();
+    html += "</body></html>";
+    return html;
+  }
+
+  String soutenance2RoseDesVents() {
+    String html = commonHead("Drawbot - Rose des vents");
+
+    html += R"rawliteral(
+  <main>
+    <h1>Soutenance 2 - Séquence 3 : rose des vents</h1>
+    <p class="subtitle">
+      Orientation du robot vers le Nord grâce au magnétomètre.
+    </p>
+
+    <p>
+      <a href="/soutenance2">← Retour soutenance 2</a>
+    </p>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Calibration magnétomètre</h2>
+        <p>
+          Les valeurs de calibration sont automatiquement chargées au démarrage.
+        </p>
+
+        <div class="value"><span>Calibration chargée</span><span id="magCalibrationLoaded">---</span></div>
+        <div class="value"><span>Offset X</span><span id="magOffsetX">---</span></div>
+        <div class="value"><span>Offset Y</span><span id="magOffsetY">---</span></div>
+        <div class="value"><span>Scale X</span><span id="magScaleX">---</span></div>
+        <div class="value"><span>Scale Y</span><span id="magScaleY">---</span></div>
+
+        <br>
+        <button class="btn-green" onclick="api('/api/calibrate-mag')">
+          Recalibrer et enregistrer
+        </button>
+
+        <button class="btn-red" onclick="api('/api/clear-mag-calibration')">
+          Effacer calibration sauvegardée
+        </button>
+      </section>
+
+      <section class="card">
+        <h2>Rose des vents</h2>
+
+        <label>Longueur flèche en cm</label>
+        <input id="compassLength" type="number" value="10" min="3" max="30" step="0.1"><br>
+
+        <label>PWM rotation</label>
+        <input id="compassPwm" type="number" value="150" min="80" max="255" step="1">
+
+        <br><br>
+        <button class="btn-purple" onclick="startCompass()">
+          Lancer orientation Nord
+        </button>
+
+        <button class="btn-red" onclick="api('/api/stop')">STOP</button>
+      </section>
+
+      <section class="card">
+        <h2>Orientation</h2>
+        <div class="value"><span>Cap magnétique</span><span id="headingMag">---</span></div>
+        <div class="value"><span>Yaw gyro</span><span id="yawGyro">---</span></div>
+        <div class="value"><span>Theta odométrie</span><span id="odoTheta">---</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Console ESP32</h2>
+        <div id="console" class="console">Chargement...</div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+  async function startCompass() {
+    const params = new URLSearchParams();
+    params.append("length", document.getElementById("compassLength").value);
+    params.append("pwm", document.getElementById("compassPwm").value);
+
+    await fetch("/api/s2/rose/start?" + params.toString());
+  }
+  </script>
+  )rawliteral";
+
+    html += commonScript();
+
+    html += R"rawliteral(
+  <script>
+  async function refreshCompassCalibration() {
+    try {
+      const res = await fetch("/api/status");
+      const d = await res.json();
+
+      setText("magCalibrationLoaded", d.magCalibrationLoaded ? "OUI" : "NON");
+      setText("magOffsetX", fmt(d.magOffsetX, 2));
+      setText("magOffsetY", fmt(d.magOffsetY, 2));
+      setText("magScaleX", fmt(d.magScaleX, 4));
+      setText("magScaleY", fmt(d.magScaleY, 4));
+    } catch(e) {}
+  }
+
+  setInterval(refreshCompassCalibration, 500);
+  refreshCompassCalibration();
+  </script>
+  )rawliteral";
+
     html += "</body></html>";
     return html;
   }
