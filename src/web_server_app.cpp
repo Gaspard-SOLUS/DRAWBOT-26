@@ -10,6 +10,7 @@
 #include "odometry.h"
 #include "sensors.h"
 #include "logger.h"
+#include "s2_escalier.h"
 
 static const char* DRAWBOT_AP_SSID = "DRAWBOT_#S4S25-G-2314";
 static const char* DRAWBOT_AP_PASS = "!12345678!";
@@ -163,21 +164,78 @@ static void handleS2Test() {
   server.send(200, "text/plain", "S2_TEST");
 }
 
+static bool hasNonEmptyArg(const char* name) {
+  return server.hasArg(name) && server.arg(name).length() > 0;
+}
+
+static void readS2EscalierArgs(S2Escalier::Config& cfg) {
+  if (hasNonEmptyArg("dist1Cm")) cfg.dist1Cm = server.arg("dist1Cm").toFloat();
+  if (hasNonEmptyArg("dist2Cm")) cfg.dist2Cm = server.arg("dist2Cm").toFloat();
+  if (hasNonEmptyArg("dist3Cm")) cfg.dist3Cm = server.arg("dist3Cm").toFloat();
+
+  if (hasNonEmptyArg("wheelBaseCm")) cfg.wheelBaseCm = server.arg("wheelBaseCm").toFloat();
+  if (hasNonEmptyArg("penOffsetCm")) cfg.penOffsetCm = server.arg("penOffsetCm").toFloat();
+  if (hasNonEmptyArg("slowZoneCm")) cfg.slowZoneCm = server.arg("slowZoneCm").toFloat();
+  if (hasNonEmptyArg("endToleranceCm")) cfg.endToleranceCm = server.arg("endToleranceCm").toFloat();
+
+  if (hasNonEmptyArg("minPwm")) cfg.minPwm = server.arg("minPwm").toInt();
+  if (hasNonEmptyArg("maxPwm")) cfg.maxPwm = server.arg("maxPwm").toInt();
+  if (hasNonEmptyArg("maxWheelSpeedCms")) cfg.maxWheelSpeedCms = server.arg("maxWheelSpeedCms").toFloat();
+
+  if (hasNonEmptyArg("speedA")) cfg.pidA.penSpeedCms = server.arg("speedA").toFloat();
+  if (hasNonEmptyArg("kpA")) cfg.pidA.kpLat = server.arg("kpA").toFloat();
+  if (hasNonEmptyArg("kiA")) cfg.pidA.kiLat = server.arg("kiA").toFloat();
+  if (hasNonEmptyArg("kdA")) cfg.pidA.kdLat = server.arg("kdA").toFloat();
+  if (hasNonEmptyArg("maxCorrA")) cfg.pidA.maxLatCorrectionCms = server.arg("maxCorrA").toFloat();
+
+  if (hasNonEmptyArg("speedB")) cfg.pidB.penSpeedCms = server.arg("speedB").toFloat();
+  if (hasNonEmptyArg("kpB")) cfg.pidB.kpLat = server.arg("kpB").toFloat();
+  if (hasNonEmptyArg("kiB")) cfg.pidB.kiLat = server.arg("kiB").toFloat();
+  if (hasNonEmptyArg("kdB")) cfg.pidB.kdLat = server.arg("kdB").toFloat();
+  if (hasNonEmptyArg("maxCorrB")) cfg.pidB.maxLatCorrectionCms = server.arg("maxCorrB").toFloat();
+
+  if (hasNonEmptyArg("integralLimit")) cfg.integralLimit = server.arg("integralLimit").toFloat();
+  if (hasNonEmptyArg("headingSource")) cfg.headingSource = server.arg("headingSource").toInt();
+
+  // Compatibilite avec l'ancienne page qui envoyait d1/d2/d3
+  if (hasNonEmptyArg("d1")) cfg.dist1Cm = server.arg("d1").toFloat();
+  if (hasNonEmptyArg("d2")) cfg.dist2Cm = server.arg("d2").toFloat();
+  if (hasNonEmptyArg("d3")) cfg.dist3Cm = server.arg("d3").toFloat();
+}
+
 static void handleS2EscalierStart() {
-  float d1 = server.hasArg("d1") ? server.arg("d1").toFloat() : 20.0f;
-  float aL = server.hasArg("aL") ? server.arg("aL").toFloat() : 90.0f;
-  float d2 = server.hasArg("d2") ? server.arg("d2").toFloat() : 10.0f;
-  float aR = server.hasArg("aR") ? server.arg("aR").toFloat() : 90.0f;
-  float d3 = server.hasArg("d3") ? server.arg("d3").toFloat() : 40.0f;
+  S2Escalier::Config cfg = S2Escalier::getConfig();
+  readS2EscalierArgs(cfg);
+  S2Escalier::setConfig(cfg);
+  S2Escalier::start();
 
-  Logger::log("Demande sequence ESCALIER");
-  Logger::log("d1=" + String(d1, 1) +
-              " aL=" + String(aL, 1) +
-              " d2=" + String(d2, 1) +
-              " aR=" + String(aR, 1) +
-              " d3=" + String(d3, 1));
+  Logger::log("Demande sequence ESCALIER 2 PID");
+  server.send(200, "text/plain", "S2_ESCALIER_STARTED");
+}
 
-  server.send(200, "text/plain", "S2_ESCALIER_START");
+static void handleS2EscalierConfig() {
+  server.send(200, "application/json", S2Escalier::configJson());
+}
+
+static void handleS2EscalierStatus() {
+  server.send(200, "application/json", S2Escalier::statusJson());
+}
+
+static void handleS2EscalierSet() {
+  S2Escalier::Config cfg = S2Escalier::getConfig();
+  readS2EscalierArgs(cfg);
+  S2Escalier::setConfig(cfg);
+  server.send(200, "text/plain", "OK");
+}
+
+static void handleS2EscalierSave() {
+  S2Escalier::saveConfig();
+  server.send(200, "text/plain", "SAVED");
+}
+
+static void handleS2EscalierStop() {
+  S2Escalier::stop();
+  server.send(200, "text/plain", "STOPPED");
 }
 
 static void handleS2CercleStart() {
@@ -232,6 +290,11 @@ namespace WebApp {
 
     server.on("/api/s2/test", handleS2Test);
     server.on("/api/s2/escalier/start", handleS2EscalierStart);
+    server.on("/api/s2/escalier/config", handleS2EscalierConfig);
+    server.on("/api/s2/escalier/status", handleS2EscalierStatus);
+    server.on("/api/s2/escalier/set", handleS2EscalierSet);
+    server.on("/api/s2/escalier/save", handleS2EscalierSave);
+    server.on("/api/s2/escalier/stop", handleS2EscalierStop);
     server.on("/api/s2/cercle/start", handleS2CercleStart);
     server.on("/api/s2/rose/start", handleS2RoseStart);
 

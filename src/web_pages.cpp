@@ -458,47 +458,114 @@ refreshLogs();
   <main>
     <h1>Soutenance 2 - Séquence 1 : l'escalier</h1>
     <p class="subtitle">
-      Réglage et lancement de la séquence escalier.
+      Suivi de la trajectoire du stylo avec deux PID latéraux : PID A puis PID B.
     </p>
 
-    <p>
-      <a href="/soutenance2">← Retour soutenance 2</a>
-    </p>
+    <p><a href="/soutenance2">← Retour soutenance 2</a></p>
 
     <div class="grid">
       <section class="card">
-        <h2>Paramètres escalier</h2>
+        <h2>1. Géométrie</h2>
 
-        <label>Distance 1 en cm</label>
-        <input id="stairDist1" type="number" value="20" step="0.1"><br>
+        <label>Distance segment 1 — cm</label>
+        <input id="dist1Cm" type="number" step="0.1" value="20">
 
-        <label>Angle gauche en degrés</label>
-        <input id="stairAngleLeft" type="number" value="90" step="1"><br>
+        <label>Distance segment 2 — cm</label>
+        <input id="dist2Cm" type="number" step="0.1" value="10">
 
-        <label>Distance 2 en cm</label>
-        <input id="stairDist2" type="number" value="10" step="0.1"><br>
+        <label>Distance segment 3 — cm</label>
+        <input id="dist3Cm" type="number" step="0.1" value="40">
 
-        <label>Angle droite en degrés</label>
-        <input id="stairAngleRight" type="number" value="90" step="1"><br>
+        <label>Entraxe roues — cm</label>
+        <input id="wheelBaseCm" type="number" step="0.1" value="8.3">
 
-        <label>Distance 3 en cm</label>
-        <input id="stairDist3" type="number" value="40" step="0.1">
-
-        <br><br>
-        <button class="btn-green" onclick="startStair()">Lancer escalier</button>
-        <button class="btn-red" onclick="api('/api/stop')">STOP</button>
-        <button class="btn-blue" onclick="api('/api/reset-encoders')">RESET odométrie</button>
+        <label>Offset stylo — cm</label>
+        <input id="penOffsetCm" type="number" step="0.1" value="13">
       </section>
 
       <section class="card">
-        <h2>État robot</h2>
-        <div class="value"><span>État</span><span id="state">---</span></div>
-        <div class="value"><span>Mode</span><span id="mode">---</span></div>
-        <div class="value"><span>PWM gauche</span><span id="pwmL">---</span></div>
-        <div class="value"><span>PWM droite</span><span id="pwmR">---</span></div>
-        <div class="value"><span>X</span><span id="odoX">---</span></div>
-        <div class="value"><span>Y</span><span id="odoY">---</span></div>
-        <div class="value"><span>Theta</span><span id="odoTheta">---</span></div>
+        <h2>2. Paramètres moteur</h2>
+
+        <label>PWM minimum moteur</label>
+        <input id="minPwm" type="number" step="1" value="145">
+
+        <label>PWM maximum moteur</label>
+        <input id="maxPwm" type="number" step="1" value="210">
+
+        <label>Vitesse roue max estimée — cm/s</label>
+        <input id="maxWheelSpeedCms" type="number" step="0.1" value="18">
+
+        <label>Zone ralentissement fin segment — cm</label>
+        <input id="slowZoneCm" type="number" step="0.1" value="3">
+
+        <label>Tolérance fin segment — cm</label>
+        <input id="endToleranceCm" type="number" step="0.05" value="0.35">
+
+        <label>Source orientation : 0=odom, 1=gyro, 2=mag</label>
+        <input id="headingSource" type="number" min="0" max="2" step="1" value="0">
+      </section>
+
+      <section class="card">
+        <h2>3. PID A</h2>
+        <p class="subtitle">Utilisé pour le segment 1 et la première moitié du segment 2.</p>
+
+        <label>Vitesse stylo A — cm/s</label>
+        <input id="speedA" type="number" step="0.1" value="3.0">
+
+        <label>Kp A</label>
+        <input id="kpA" type="number" step="0.01" value="0.65">
+
+        <label>Ki A</label>
+        <input id="kiA" type="number" step="0.01" value="0">
+
+        <label>Kd A</label>
+        <input id="kdA" type="number" step="0.01" value="0.22">
+
+        <label>Correction latérale max A — cm/s</label>
+        <input id="maxCorrA" type="number" step="0.1" value="5.0">
+      </section>
+
+      <section class="card">
+        <h2>4. PID B</h2>
+        <p class="subtitle">Utilisé pour la deuxième moitié du segment 2 et le segment 3.</p>
+
+        <label>Vitesse stylo B — cm/s</label>
+        <input id="speedB" type="number" step="0.1" value="1.5">
+
+        <label>Kp B</label>
+        <input id="kpB" type="number" step="0.01" value="0.20">
+
+        <label>Ki B</label>
+        <input id="kiB" type="number" step="0.01" value="0">
+
+        <label>Kd B</label>
+        <input id="kdB" type="number" step="0.01" value="0.10">
+
+        <label>Correction latérale max B — cm/s</label>
+        <input id="maxCorrB" type="number" step="0.1" value="0.8">
+      </section>
+
+      <section class="card">
+        <h2>5. Commandes</h2>
+        <button class="btn-blue" onclick="applyEscalierConfig()">Appliquer les valeurs</button>
+        <button class="btn-green" onclick="saveEscalierConfig()">Enregistrer en mémoire</button>
+        <button class="btn-orange" onclick="startStair()">Lancer escalier</button>
+        <button class="btn-red" onclick="api('/api/s2/escalier/stop')">STOP escalier</button>
+        <button class="btn-dark" onclick="api('/api/reset-encoders')">RESET odométrie</button>
+      </section>
+
+      <section class="card">
+        <h2>6. État escalier</h2>
+        <div class="value"><span>État</span><span id="escState">---</span></div>
+        <div class="value"><span>Segment</span><span id="escSegment">---</span></div>
+        <div class="value"><span>PID actif</span><span id="escPid">---</span></div>
+        <div class="value"><span>Progression</span><span id="escProgress">---</span></div>
+        <div class="value"><span>Erreur latérale</span><span id="escError">---</span></div>
+        <div class="value"><span>Kp actif</span><span id="escKp">---</span></div>
+        <div class="value"><span>Kd actif</span><span id="escKd">---</span></div>
+        <div class="value"><span>Vitesse active</span><span id="escSpeed">---</span></div>
+        <div class="value"><span>PWM gauche</span><span id="escPwmL">---</span></div>
+        <div class="value"><span>PWM droite</span><span id="escPwmR">---</span></div>
       </section>
 
       <section class="card">
@@ -509,16 +576,69 @@ refreshLogs();
   </main>
 
   <script>
-  async function startStair() {
-    const params = new URLSearchParams();
-    params.append("d1", document.getElementById("stairDist1").value);
-    params.append("aL", document.getElementById("stairAngleLeft").value);
-    params.append("d2", document.getElementById("stairDist2").value);
-    params.append("aR", document.getElementById("stairAngleRight").value);
-    params.append("d3", document.getElementById("stairDist3").value);
+  const stairFields = [
+    "dist1Cm", "dist2Cm", "dist3Cm",
+    "wheelBaseCm", "penOffsetCm",
+    "minPwm", "maxPwm", "maxWheelSpeedCms",
+    "slowZoneCm", "endToleranceCm", "headingSource",
+    "speedA", "kpA", "kiA", "kdA", "maxCorrA",
+    "speedB", "kpB", "kiB", "kdB", "maxCorrB"
+  ];
 
-    await fetch("/api/s2/escalier/start?" + params.toString());
+  function collectStairParams() {
+    const params = new URLSearchParams();
+    stairFields.forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.value !== "") params.append(id, el.value);
+    });
+    return params;
   }
+
+  async function loadEscalierConfig() {
+    try {
+      const res = await fetch("/api/s2/escalier/config");
+      const d = await res.json();
+      stairFields.forEach(id => {
+        if (d[id] !== undefined && document.getElementById(id)) {
+          document.getElementById(id).value = d[id];
+        }
+      });
+    } catch(e) {}
+  }
+
+  async function applyEscalierConfig() {
+    await fetch("/api/s2/escalier/set?" + collectStairParams().toString());
+  }
+
+  async function saveEscalierConfig() {
+    await applyEscalierConfig();
+    await fetch("/api/s2/escalier/save");
+  }
+
+  async function startStair() {
+    await fetch("/api/s2/escalier/start?" + collectStairParams().toString());
+  }
+
+  async function refreshEscalierStatus() {
+    try {
+      const res = await fetch("/api/s2/escalier/status");
+      const d = await res.json();
+      setText("escState", d.state);
+      setText("escSegment", (Number(d.segmentIndex) + 1));
+      setText("escPid", d.activePid === 1 ? "PID A" : (d.activePid === 2 ? "PID B" : "---"));
+      setText("escProgress", fmt(d.progressCm, 2) + " cm / " + fmt(d.segmentLengthCm, 2) + " cm");
+      setText("escError", fmt(d.lateralErrorCm, 3) + " cm");
+      setText("escKp", fmt(d.activeKp, 3));
+      setText("escKd", fmt(d.activeKd, 3));
+      setText("escSpeed", fmt(d.activeSpeedCms, 2) + " cm/s");
+      setText("escPwmL", d.pwmLeft);
+      setText("escPwmR", d.pwmRight);
+    } catch(e) {}
+  }
+
+  loadEscalierConfig();
+  setInterval(refreshEscalierStatus, 250);
+  refreshEscalierStatus();
   </script>
   )rawliteral";
 
