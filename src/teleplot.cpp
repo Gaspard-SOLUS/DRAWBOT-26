@@ -6,6 +6,7 @@
 #include "encodeurs.h"
 #include "odometry.h"
 #include "logger.h"
+#include "pen_inverse_follower.h"
 
 static const char* TELEPLOT_PC_IP = "192.168.4.2";
 static const int TELEPLOT_PORT = 47269;
@@ -60,5 +61,32 @@ namespace Teleplot {
     send("odo_x_cm", odometryState.xCm);
     send("odo_y_cm", odometryState.yCm);
     send("odo_theta_deg", Odometry::normalizeAngleDeg(Odometry::radToDeg(odometryState.thetaRad)));
+
+    // Escalier stylo status
+    PenInverseFollower::Status pf = PenInverseFollower::getStatus();
+
+    send("pen_x_cm", odometryState.penXCm);
+    send("pen_y_cm", odometryState.penYCm);
+
+    send("follower_target_x_cm", pf.targetX);
+    send("follower_target_y_cm", pf.targetY);
+
+    send("follower_lateral_error_cm", pf.lateralErrorCm);
+    send("follower_max_lateral_error_cm", pf.maxLateralErrorCm);
+
+    send("follower_progress_cm", pf.progressCm);
+    send("follower_segment_length_cm", pf.segmentLengthCm);
+    send("follower_segment_index", pf.currentSegment);
+
+    send("follower_v_pen_x_cms", pf.vPenX);
+    send("follower_v_pen_y_cms", pf.vPenY);
+
+    send("follower_v_left_cms", pf.vLeftCms);
+    send("follower_v_right_cms", pf.vRightCms);
+
+    send("follower_omega_rads", pf.omegaRadS);
+
+    send("follower_pwm_left", pf.pwmLeft);
+    send("follower_pwm_right", pf.pwmRight);
   }
 }

@@ -7,6 +7,7 @@
 #include "logger.h"
 
 static const float WHEEL_BASE_CM = 8.3f;
+static const float PEN_OFFSET_CM = 13.0f;
 
 static float lastDistL = 0.0f;
 static float lastDistR = 0.0f;
@@ -59,6 +60,9 @@ namespace Odometry {
     odometryState.xCm += dCenter * cos(thetaMid);
     odometryState.yCm += dCenter * sin(thetaMid);
 
+    odometryState.penXCm = odometryState.xCm + PEN_OFFSET_CM * cos(odometryState.thetaRad);
+    odometryState.penYCm = odometryState.yCm + PEN_OFFSET_CM * sin(odometryState.thetaRad);
+
     lastDistL = currentDistL;
     lastDistR = currentDistR;
     lastOdoTime = now;
@@ -77,6 +81,9 @@ namespace Odometry {
     odometryState.xCm = 0.0f;
     odometryState.yCm = 0.0f;
     odometryState.thetaRad = 0.0f;
+
+    odometryState.penXCm = PEN_OFFSET_CM;
+    odometryState.penYCm = 0.0f;
 
     Logger::log("Odometrie remise a zero");
   }

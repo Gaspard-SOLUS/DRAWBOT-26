@@ -44,6 +44,9 @@ struct OdometryState {
   float xCm = 0.0f;
   float yCm = 0.0f;
   float thetaRad = 0.0f;
+
+  float penXCm = 0.0f;
+  float penYCm = 0.0f;
 };
 
 extern MotorState motorState;

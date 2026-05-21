@@ -384,6 +384,10 @@ refreshLogs();
       Cette page regroupe les trois séquences finales du cahier des charges.
     </p>
 
+    <a href="/simulation">
+      <button class="btn-blue">Ouvrir la simulation odométrique</button>
+    </a>
+
     <div class="grid">
       <section class="card">
         <h2>Séquence 1 : l'escalier</h2>
@@ -458,7 +462,7 @@ refreshLogs();
   <main>
     <h1>Soutenance 2 - Séquence 1 : l'escalier</h1>
     <p class="subtitle">
-      Réglage et lancement de la séquence escalier.
+      Réglage et lancement de la séquence escalier avec suivi de trajectoire du stylo.
     </p>
 
     <p>
@@ -467,38 +471,166 @@ refreshLogs();
 
     <div class="grid">
       <section class="card">
-        <h2>Paramètres escalier</h2>
+        <h2>1. Tests progressifs</h2>
+        <p>
+          Commence par tester une ligne droite, puis un seul angle, puis l'escalier complet.
+        </p>
 
-        <label>Distance 1 en cm</label>
-        <input id="stairDist1" type="number" value="20" step="0.1"><br>
+        <label>Distance ligne test — cm</label>
+        <input id="lineDistance" type="number" value="20" step="0.1">
 
-        <label>Angle gauche en degrés</label>
-        <input id="stairAngleLeft" type="number" value="90" step="1"><br>
+        <button class="btn-blue" onclick="startLineTest()">Tester ligne droite</button>
 
-        <label>Distance 2 en cm</label>
-        <input id="stairDist2" type="number" value="10" step="0.1"><br>
+        <br><br>
 
-        <label>Angle droite en degrés</label>
-        <input id="stairAngleRight" type="number" value="90" step="1"><br>
+        <label>Angle test distance 1 — cm</label>
+        <input id="angleD1" type="number" value="20" step="0.1">
 
-        <label>Distance 3 en cm</label>
+        <label>Angle test — degrés</label>
+        <input id="angleValue" type="number" value="90" step="1">
+
+        <label>Angle test distance 2 — cm</label>
+        <input id="angleD2" type="number" value="10" step="0.1">
+
+        <button class="btn-orange" onclick="startAngleTest()">Tester un angle</button>
+      </section>
+
+      <section class="card">
+        <h2>2. Paramètres escalier complet</h2>
+
+        <label>Distance 1 — cm</label>
+        <input id="stairDist1" type="number" value="20" step="0.1">
+
+        <label>Angle gauche — degrés</label>
+        <input id="stairAngleLeft" type="number" value="90" step="1">
+
+        <label>Distance 2 — cm</label>
+        <input id="stairDist2" type="number" value="10" step="0.1">
+
+        <label>Angle droite — degrés</label>
+        <input id="stairAngleRight" type="number" value="90" step="1">
+
+        <label>Distance 3 — cm</label>
         <input id="stairDist3" type="number" value="40" step="0.1">
 
         <br><br>
-        <button class="btn-green" onclick="startStair()">Lancer escalier</button>
-        <button class="btn-red" onclick="api('/api/stop')">STOP</button>
+
+        <button class="btn-green" onclick="startStair()">Lancer escalier complet</button>
+        <button class="btn-red" onclick="api('/api/s2/escalier/stop')">STOP follower</button>
+        <button class="btn-red" onclick="api('/api/stop')">STOP moteurs</button>
         <button class="btn-blue" onclick="api('/api/reset-encoders')">RESET odométrie</button>
       </section>
 
       <section class="card">
-        <h2>État robot</h2>
+        <h2>3. Géométrie robot</h2>
+
+        <label>Écartement des roues — cm</label>
+        <input id="wheelBase" type="number" value="8.3" step="0.1">
+
+        <label>Distance axe roues → stylo — cm</label>
+        <input id="penOffset" type="number" value="13.0" step="0.1">
+
+        <label>Tolérance fin de segment — cm</label>
+        <input id="segTol" type="number" value="0.20" step="0.01">
+
+        <p>
+          Le stylo est devant l'axe des roues. La commande calcule donc les vitesses
+          des roues à partir de la vitesse souhaitée du stylo.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>4. Commande du stylo</h2>
+
+        <label>Vitesse stylo — cm/s</label>
+        <input id="penSpeed" type="number" value="4.0" step="0.1">
+
+        <label>Gain retour vers ligne</label>
+        <input id="lineGain" type="number" value="1.5" step="0.1">
+
+        <label>Gain attraction point cible</label>
+        <input id="targetGain" type="number" value="0.8" step="0.1">
+
+        <label>Lookahead — cm</label>
+        <input id="lookahead" type="number" value="2.0" step="0.1">
+
+        <label>Vitesse stylo max — cm/s</label>
+        <input id="penSpeedMax" type="number" value="8.0" step="0.1">
+
+        <label>Vitesse roue max — cm/s</label>
+        <input id="wheelSpeedMax" type="number" value="10.0" step="0.1">
+      </section>
+
+      <section class="card">
+        <h2>5. PID correction latérale</h2>
+
+        <label>Kp</label>
+        <input id="kp" type="number" value="0.20" step="0.01">
+
+        <label>Ki</label>
+        <input id="ki" type="number" value="0.00" step="0.01">
+
+        <label>Kd</label>
+        <input id="kd" type="number" value="0.05" step="0.01">
+
+        <label>Limite intégrale</label>
+        <input id="iLimit" type="number" value="10" step="1">
+
+        <p>
+          Le PID corrige l'écart latéral du stylo par rapport à la ligne idéale.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>6. Conversion vitesse → PWM</h2>
+
+        <label>Coefficient moteur gauche — cm/s/PWM</label>
+        <input id="coefL" type="number" value="0.080" step="0.001">
+
+        <label>Coefficient moteur droit — cm/s/PWM</label>
+        <input id="coefR" type="number" value="0.080" step="0.001">
+
+        <label>PWM minimum</label>
+        <input id="minPwm" type="number" value="90" min="0" max="255" step="1">
+
+        <p>
+          Le PWM minimum sert à compenser les frottements : si une roue doit bouger,
+          on évite de lui envoyer un PWM trop faible pour démarrer.
+        </p>
+
+        <button class="btn-blue" onclick="sendFollowerConfig()">Appliquer paramètres</button>
+        <button class="btn-dark" onclick="loadFollowerConfig()">Recharger paramètres ESP32</button>
+      </section>
+
+      <section class="card">
+        <h2>7. État robot</h2>
+
         <div class="value"><span>État</span><span id="state">---</span></div>
         <div class="value"><span>Mode</span><span id="mode">---</span></div>
         <div class="value"><span>PWM gauche</span><span id="pwmL">---</span></div>
         <div class="value"><span>PWM droite</span><span id="pwmR">---</span></div>
-        <div class="value"><span>X</span><span id="odoX">---</span></div>
-        <div class="value"><span>Y</span><span id="odoY">---</span></div>
+
+        <div class="value"><span>X base</span><span id="odoX">---</span></div>
+        <div class="value"><span>Y base</span><span id="odoY">---</span></div>
+        <div class="value"><span>X stylo</span><span id="penX">---</span></div>
+        <div class="value"><span>Y stylo</span><span id="penY">---</span></div>
         <div class="value"><span>Theta</span><span id="odoTheta">---</span></div>
+      </section>
+
+      <section class="card">
+        <h2>8. Suivi du stylo</h2>
+
+        <div class="value"><span>Follower actif</span><span id="followerRunning">---</span></div>
+        <div class="value"><span>Segment</span><span id="followerSegment">---</span></div>
+        <div class="value"><span>Cible X</span><span id="followerTargetX">---</span></div>
+        <div class="value"><span>Cible Y</span><span id="followerTargetY">---</span></div>
+        <div class="value"><span>Erreur latérale</span><span id="followerLateralError">---</span></div>
+        <div class="value"><span>Erreur max</span><span id="followerMaxLateralError">---</span></div>
+        <div class="value"><span>Progression</span><span id="followerProgress">---</span></div>
+        <div class="value"><span>Longueur segment</span><span id="followerSegmentLength">---</span></div>
+        <div class="value"><span>V roue gauche</span><span id="followerVLeft">---</span></div>
+        <div class="value"><span>V roue droite</span><span id="followerVRight">---</span></div>
+        <div class="value"><span>Omega</span><span id="followerOmega">---</span></div>
       </section>
 
       <section class="card">
@@ -509,20 +641,170 @@ refreshLogs();
   </main>
 
   <script>
+  function getValue(id) {
+    return document.getElementById(id).value;
+  }
+
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }
+
+  function fmt(v, d = 2) {
+    if (v === null || v === undefined || isNaN(v)) return "---";
+    return Number(v).toFixed(d);
+  }
+
+  function appendFollowerConfig(params) {
+    params.append("wheelBase", getValue("wheelBase"));
+    params.append("penOffset", getValue("penOffset"));
+
+    params.append("penSpeed", getValue("penSpeed"));
+    params.append("lineGain", getValue("lineGain"));
+    params.append("targetGain", getValue("targetGain"));
+    params.append("lookahead", getValue("lookahead"));
+
+    params.append("penSpeedMax", getValue("penSpeedMax"));
+    params.append("wheelSpeedMax", getValue("wheelSpeedMax"));
+
+    params.append("kp", getValue("kp"));
+    params.append("ki", getValue("ki"));
+    params.append("kd", getValue("kd"));
+    params.append("iLimit", getValue("iLimit"));
+
+    params.append("coefL", getValue("coefL"));
+    params.append("coefR", getValue("coefR"));
+    params.append("minPwm", getValue("minPwm"));
+
+    params.append("segTol", getValue("segTol"));
+  }
+
+  async function sendFollowerConfig() {
+    const params = new URLSearchParams();
+    appendFollowerConfig(params);
+
+    await fetch("/api/s2/escalier/config/set?" + params.toString());
+    await refreshLogs();
+  }
+
+  async function loadFollowerConfig() {
+    const res = await fetch("/api/s2/escalier/config");
+    const d = await res.json();
+
+    document.getElementById("wheelBase").value = d.wheelBase;
+    document.getElementById("penOffset").value = d.penOffset;
+
+    document.getElementById("penSpeed").value = d.penSpeed;
+    document.getElementById("lineGain").value = d.lineGain;
+    document.getElementById("targetGain").value = d.targetGain;
+    document.getElementById("lookahead").value = d.lookahead;
+
+    document.getElementById("penSpeedMax").value = d.penSpeedMax;
+    document.getElementById("wheelSpeedMax").value = d.wheelSpeedMax;
+
+    document.getElementById("kp").value = d.kp;
+    document.getElementById("ki").value = d.ki;
+    document.getElementById("kd").value = d.kd;
+    document.getElementById("iLimit").value = d.iLimit;
+
+    document.getElementById("coefL").value = d.coefL;
+    document.getElementById("coefR").value = d.coefR;
+    document.getElementById("minPwm").value = d.minPwm;
+
+    document.getElementById("segTol").value = d.segTol;
+  }
+
+  async function startLineTest() {
+    const params = new URLSearchParams();
+
+    params.append("d", getValue("lineDistance"));
+    appendFollowerConfig(params);
+
+    await fetch("/api/s2/escalier/start-line?" + params.toString());
+    await refreshLogs();
+  }
+
+  async function startAngleTest() {
+    const params = new URLSearchParams();
+
+    params.append("d1", getValue("angleD1"));
+    params.append("a", getValue("angleValue"));
+    params.append("d2", getValue("angleD2"));
+    appendFollowerConfig(params);
+
+    await fetch("/api/s2/escalier/start-angle?" + params.toString());
+    await refreshLogs();
+  }
+
   async function startStair() {
     const params = new URLSearchParams();
-    params.append("d1", document.getElementById("stairDist1").value);
-    params.append("aL", document.getElementById("stairAngleLeft").value);
-    params.append("d2", document.getElementById("stairDist2").value);
-    params.append("aR", document.getElementById("stairAngleRight").value);
-    params.append("d3", document.getElementById("stairDist3").value);
+
+    params.append("d1", getValue("stairDist1"));
+    params.append("aL", getValue("stairAngleLeft"));
+    params.append("d2", getValue("stairDist2"));
+    params.append("aR", getValue("stairAngleRight"));
+    params.append("d3", getValue("stairDist3"));
+    appendFollowerConfig(params);
 
     await fetch("/api/s2/escalier/start?" + params.toString());
+    await refreshLogs();
   }
+
+  async function api(route) {
+    await fetch(route);
+    await refreshLogs();
+  }
+
+  async function refreshStatus() {
+    try {
+      const res = await fetch("/api/status");
+      const d = await res.json();
+
+      setText("state", d.state);
+      setText("mode", d.mode);
+      setText("pwmL", d.pwmL);
+      setText("pwmR", d.pwmR);
+
+      setText("odoX", fmt(d.odoX, 2) + " cm");
+      setText("odoY", fmt(d.odoY, 2) + " cm");
+      setText("penX", fmt(d.penX, 2) + " cm");
+      setText("penY", fmt(d.penY, 2) + " cm");
+      setText("odoTheta", fmt(d.odoTheta, 1) + "°");
+
+      setText("followerRunning", d.followerRunning ? "OUI" : "NON");
+      setText("followerSegment", d.followerSegment + " / " + d.followerSegmentCount);
+      setText("followerTargetX", fmt(d.followerTargetX, 2) + " cm");
+      setText("followerTargetY", fmt(d.followerTargetY, 2) + " cm");
+      setText("followerLateralError", fmt(d.followerLateralError, 2) + " cm");
+      setText("followerMaxLateralError", fmt(d.followerMaxLateralError, 2) + " cm");
+      setText("followerProgress", fmt(d.followerProgress, 2) + " cm");
+      setText("followerSegmentLength", fmt(d.followerSegmentLength, 2) + " cm");
+      setText("followerVLeft", fmt(d.followerVLeft, 2) + " cm/s");
+      setText("followerVRight", fmt(d.followerVRight, 2) + " cm/s");
+      setText("followerOmega", fmt(d.followerOmega, 2) + " rad/s");
+    } catch(e) {}
+  }
+
+  async function refreshLogs() {
+    const box = document.getElementById("console");
+
+    try {
+      const res = await fetch("/api/logs");
+      box.textContent = await res.text();
+    } catch(e) {
+      box.textContent = "Erreur lecture console";
+    }
+  }
+
+  loadFollowerConfig();
+  refreshStatus();
+  refreshLogs();
+
+  setInterval(refreshStatus, 250);
+  setInterval(refreshLogs, 1000);
   </script>
   )rawliteral";
 
-    html += commonScript();
     html += "</body></html>";
     return html;
   }
@@ -705,6 +987,315 @@ refreshLogs();
   </script>
   )rawliteral";
 
+    html += "</body></html>";
+    return html;
+  }
+
+  String simulation() {
+    String html = commonHead("Drawbot - Simulation odométrique");
+
+    html += R"rawliteral(
+  <main>
+    <h1>Simulation odométrique du Drawbot</h1>
+    <p class="subtitle">
+      Visualisation en temps réel du mouvement estimé du robot, de l'axe des roues
+      et de la position du stylo à partir des encodeurs.
+    </p>
+
+    <p>
+      <a href="/soutenance2">← Retour soutenance 2</a>
+    </p>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Vue 2D du robot</h2>
+        <canvas id="simCanvas" width="900" height="600"
+          style="width:100%; max-width:900px; background:#020617; border:1px solid #1e293b; border-radius:14px;">
+        </canvas>
+
+        <br><br>
+
+        <button class="btn-blue" onclick="resetView()">Recentrer la vue</button>
+        <button class="btn-orange" onclick="clearTrace()">Effacer la trace virtuelle</button>
+        <button class="btn-red" onclick="api('/api/stop')">STOP moteurs</button>
+        <button class="btn-green" onclick="api('/api/reset-encoders'); clearTrace();">RESET odométrie + trace</button>
+      </section>
+
+      <section class="card">
+        <h2>Données odométrie</h2>
+        <div class="value"><span>Base X</span><span id="odoX">---</span></div>
+        <div class="value"><span>Base Y</span><span id="odoY">---</span></div>
+        <div class="value"><span>Stylo X</span><span id="penX">---</span></div>
+        <div class="value"><span>Stylo Y</span><span id="penY">---</span></div>
+        <div class="value"><span>Orientation</span><span id="odoTheta">---</span></div>
+        <div class="value"><span>Vitesse gauche</span><span id="speedL">---</span></div>
+        <div class="value"><span>Vitesse droite</span><span id="speedR">---</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Paramètres géométriques</h2>
+        <div class="value"><span>Écartement roues</span><span>8.3 cm</span></div>
+        <div class="value"><span>Offset stylo</span><span>13.0 cm</span></div>
+        <div class="value"><span>Modèle robot</span><span>rectangle 2D</span></div>
+        <p>
+          Le rectangle représente le robot vu de dessus. Le point rouge représente
+          le stylo. La trace rouge correspond au chemin du stylo.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Commandes manuelles</h2>
+
+        <label>PWM manuel</label>
+        <input id="manualPwm" type="number" value="160" min="80" max="255">
+
+        <div class="manual-grid">
+          <div></div>
+          <button class="btn-dark" onclick="drive('forward')">↑</button>
+          <div></div>
+
+          <button class="btn-dark" onclick="drive('left')">←</button>
+          <button class="btn-red" onclick="drive('stop')">■</button>
+          <button class="btn-dark" onclick="drive('right')">→</button>
+
+          <div></div>
+          <button class="btn-dark" onclick="drive('backward')">↓</button>
+          <div></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Console ESP32</h2>
+        <div id="console" class="console">Chargement...</div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+  const canvas = document.getElementById("simCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const WHEEL_BASE_CM = 8.3;
+  const PEN_OFFSET_CM = 13.0;
+
+  // Représentation visuelle du robot.
+  // Longueur du robot dessinée : axe des roues -> avant un peu plus loin que le stylo.
+  const ROBOT_LENGTH_CM = 18.0;
+  const ROBOT_WIDTH_CM = 10.0;
+
+  let scale = 8;              // pixels par cm
+  let centerX = canvas.width / 2;
+  let centerY = canvas.height / 2;
+
+  let trace = [];
+  let lastPen = null;
+
+  function worldToCanvas(xCm, yCm) {
+    return {
+      x: centerX + xCm * scale,
+      y: centerY - yCm * scale
+    };
+  }
+
+  function drawGrid() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(148,163,184,0.15)";
+
+    const stepCm = 5;
+    const stepPx = stepCm * scale;
+
+    for (let x = centerX % stepPx; x < canvas.width; x += stepPx) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+
+    for (let y = centerY % stepPx; y < canvas.height; y += stepPx) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
+
+    // axes
+    ctx.strokeStyle = "rgba(56,189,248,0.5)";
+    ctx.beginPath();
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(canvas.width, centerY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(centerX, 0);
+    ctx.lineTo(centerX, canvas.height);
+    ctx.stroke();
+  }
+
+  function drawTrace() {
+    if (trace.length < 2) return;
+
+    ctx.strokeStyle = "#ef4444";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+
+    const first = worldToCanvas(trace[0].x, trace[0].y);
+    ctx.moveTo(first.x, first.y);
+
+    for (let i = 1; i < trace.length; i++) {
+      const p = worldToCanvas(trace[i].x, trace[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
+
+    ctx.stroke();
+  }
+
+  function drawRobot(baseX, baseY, thetaDeg, penX, penY) {
+    const theta = thetaDeg * Math.PI / 180.0;
+
+    const base = worldToCanvas(baseX, baseY);
+    const pen = worldToCanvas(penX, penY);
+
+    ctx.save();
+    ctx.translate(base.x, base.y);
+    ctx.rotate(-theta);
+
+    // Robot rectangle vu de dessus
+    // L'axe des roues est à x=0.
+    const front = ROBOT_LENGTH_CM * scale;
+    const rear = -4 * scale;
+    const width = ROBOT_WIDTH_CM * scale;
+
+    ctx.fillStyle = "rgba(56,189,248,0.20)";
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    ctx.rect(rear, -width / 2, front - rear, width);
+    ctx.fill();
+    ctx.stroke();
+
+    // axe des roues
+    ctx.strokeStyle = "#e5e7eb";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, -WHEEL_BASE_CM * scale / 2);
+    ctx.lineTo(0, WHEEL_BASE_CM * scale / 2);
+    ctx.stroke();
+
+    // ligne centre -> stylo
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(PEN_OFFSET_CM * scale, 0);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // point base
+    ctx.fillStyle = "#38bdf8";
+    ctx.beginPath();
+    ctx.arc(base.x, base.y, 5, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // point stylo
+    ctx.fillStyle = "#ef4444";
+    ctx.beginPath();
+    ctx.arc(pen.x, pen.y, 6, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  function redraw(d) {
+    drawGrid();
+    drawTrace();
+    drawRobot(d.odoX, d.odoY, d.odoTheta, d.penX, d.penY);
+  }
+
+  function clearTrace() {
+    trace = [];
+    lastPen = null;
+  }
+
+  function resetView() {
+    centerX = canvas.width / 2;
+    centerY = canvas.height / 2;
+  }
+
+  function addPenPoint(x, y) {
+    if (!lastPen) {
+      trace.push({x, y});
+      lastPen = {x, y};
+      return;
+    }
+
+    const dx = x - lastPen.x;
+    const dy = y - lastPen.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // évite d'ajouter trop de points identiques
+    if (dist > 0.05) {
+      trace.push({x, y});
+      lastPen = {x, y};
+    }
+
+    // limite mémoire navigateur
+    if (trace.length > 3000) {
+      trace.shift();
+    }
+  }
+
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }
+
+  function fmt(v, d = 2) {
+    if (v === null || v === undefined || isNaN(v)) return "---";
+    return Number(v).toFixed(d);
+  }
+
+  async function refreshSimulation() {
+    try {
+      const res = await fetch("/api/status");
+      const d = await res.json();
+
+      addPenPoint(d.penX, d.penY);
+      redraw(d);
+
+      setText("odoX", fmt(d.odoX, 2) + " cm");
+      setText("odoY", fmt(d.odoY, 2) + " cm");
+      setText("penX", fmt(d.penX, 2) + " cm");
+      setText("penY", fmt(d.penY, 2) + " cm");
+      setText("odoTheta", fmt(d.odoTheta, 1) + "°");
+      setText("speedL", fmt(d.speedL, 2) + " cm/s");
+      setText("speedR", fmt(d.speedR, 2) + " cm/s");
+    } catch(e) {}
+  }
+
+  async function refreshLogs() {
+    const box = document.getElementById("console");
+    if (!box) return;
+
+    try {
+      const res = await fetch("/api/logs");
+      box.textContent = await res.text();
+    } catch(e) {
+      box.textContent = "Erreur lecture console";
+    }
+  }
+
+  setInterval(refreshSimulation, 100);
+  setInterval(refreshLogs, 1000);
+
+  drawGrid();
+  refreshSimulation();
+  refreshLogs();
+  </script>
+  )rawliteral";
+
+    html += commonScript();
     html += "</body></html>";
     return html;
   }

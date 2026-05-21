@@ -11,6 +11,7 @@
 #include "teleplot.h"
 #include "web_server_app.h"
 #include "soutenance2.h"
+#include "pen_inverse_follower.h"
 
 // ==================================================
 // TIMERS
@@ -43,6 +44,7 @@ void setup() {
   Teleplot::begin();
 
   Soutenance2::begin();
+  PenInverseFollower::begin();
 
   Logger::log("Initialisation terminee");
 }
@@ -59,6 +61,7 @@ void loop() {
     Sensors::update(now, dt);
     Odometry::update(now);
     Soutenance2::update(now, dt);
+    PenInverseFollower::update(now, dt);
   }
 
   Teleplot::update(now);

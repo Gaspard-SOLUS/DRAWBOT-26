@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Drawbot Simulator V3 - Commande directe du stylo</title>
+<style>
+:root{--bg:#0f172a;--panel:#020617;--card:#111827;--border:#1e293b;--text:#e5e7eb;--muted:#94a3b8;--accent:#38bdf8;--green:#22c55e;--red:#ef4444;--orange:#f97316;--purple:#a855f7;--yellow:#facc15}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}.app{display:grid;grid-template-columns:410px 1fr;min-height:100vh}.sidebar{background:var(--panel);border-right:1px solid var(--border);padding:18px;height:100vh;overflow:auto}main{padding:18px;overflow:hidden}h1{font-size:24px;margin:0 0 6px}h2{font-size:17px;margin:0 0 12px}h3{font-size:14px;color:var(--muted);margin:14px 0 8px}p,.help{color:var(--muted);line-height:1.42;font-size:13px}.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:0 10px 28px rgba(0,0,0,.25)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}label{display:block;color:var(--muted);font-size:13px;margin-bottom:5px}input,textarea{width:100%;border-radius:10px;border:1px solid var(--border);background:#020617;color:var(--text);padding:9px;font-size:14px}button{border:0;border-radius:12px;padding:11px 12px;color:white;font-weight:bold;cursor:pointer;width:100%}.btn-blue{background:var(--accent);color:#082f49}.btn-green{background:var(--green)}.btn-red{background:var(--red)}.btn-orange{background:var(--orange)}.btn-purple{background:var(--purple)}.btn-dark{background:#334155}.btn-yellow{background:var(--yellow);color:#422006}.toolbar{display:grid;grid-template-columns:repeat(7,minmax(90px,1fr));gap:10px;margin-bottom:14px}.canvas-wrap{background:var(--panel);border:1px solid var(--border);border-radius:18px;overflow:hidden;height:calc(100vh - 205px);min-height:560px;position:relative}canvas{display:block;width:100%;height:100%;background:#020617}.overlay{position:absolute;left:16px;top:16px;background:rgba(2,6,23,.84);border:1px solid var(--border);border-radius:14px;padding:12px;min-width:310px;backdrop-filter:blur(8px)}.value{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(148,163,184,.15);padding:7px 0;font-size:13px}.value:last-child{border-bottom:0}.value span:first-child{color:var(--muted)}.value span:last-child{font-family:Consolas,monospace;font-weight:bold;text-align:right}.badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:bold}.run{background:var(--green);color:#052e16}.idle{background:#64748b}.pause{background:var(--orange);color:#431407}.done{background:var(--accent);color:#082f49}.console{background:#020617;border:1px solid var(--border);border-radius:14px;padding:10px;height:145px;overflow:auto;color:#a7f3d0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap}.ok{background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.35);border-radius:12px;padding:10px;color:#bbf7d0;font-size:13px}.warn{background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.35);border-radius:12px;padding:10px;color:#fed7aa;font-size:13px}.bad{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:12px;padding:10px;color:#fecaca;font-size:13px}.kbd{font-family:Consolas,monospace;background:#1e293b;border:1px solid var(--border);border-radius:6px;padding:2px 5px}@media(max-width:1100px){.app{grid-template-columns:1fr}.sidebar{height:auto;border-right:0;border-bottom:1px solid var(--border)}.toolbar{grid-template-columns:repeat(2,1fr)}.canvas-wrap{height:70vh}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<h1>Drawbot Simulator V3</h1>
+<p>Commande directe du <strong>vecteur vitesse du stylo</strong>, puis conversion mathématique en vitesses de roues. Ce n’est plus “tourner puis avancer”.</p>
+
+<section class="card"><h2>1. Escalier idéal du stylo</h2><div class="grid2">
+<div><label>Distance 1 (cm)</label><input id="d1" type="number" value="20" step="0.1"></div>
+<div><label>Angle gauche (°)</label><input id="a1" type="number" value="90" step="1"></div>
+<div><label>Distance 2 (cm)</label><input id="d2" type="number" value="10" step="0.1"></div>
+<div><label>Angle droite (°)</label><input id="a2" type="number" value="90" step="1"></div>
+<div><label>Distance 3 (cm)</label><input id="d3" type="number" value="40" step="0.1"></div>
+<div><label>Tolérance fin segment (cm)</label><input id="segTol" type="number" value="0.18" step="0.02"></div>
+</div></section>
+
+<section class="card"><h2>2. Géométrie</h2><div class="grid2">
+<div><label>Écartement roues b (cm)</label><input id="wheelBase" type="number" value="8.3" step="0.1"></div>
+<div><label>Offset stylo L (cm)</label><input id="penOffset" type="number" value="13.0" step="0.1"></div>
+<div><label>Longueur robot dessinée (cm)</label><input id="robotLength" type="number" value="18" step="0.5"></div>
+<div><label>Largeur robot dessinée (cm)</label><input id="robotWidth" type="number" value="10" step="0.5"></div>
+</div></section>
+
+<section class="card"><h2>3. Commande stylo → roues</h2>
+<div class="grid2">
+<div><label>Vitesse stylo nominale (cm/s)</label><input id="penSpeed" type="number" value="7.0" step="0.2"></div>
+<div><label>Gain retour vers ligne</label><input id="kLine" type="number" value="2.4" step="0.1"></div>
+<div><label>Gain attraction point cible</label><input id="kTarget" type="number" value="1.2" step="0.1"></div>
+<div><label>Lookahead sur segment (cm)</label><input id="lookahead" type="number" value="2.0" step="0.1"></div>
+<div><label>Vitesse stylo max (cm/s)</label><input id="penSpeedMax" type="number" value="13.0" step="0.5"></div>
+<div><label>Vitesse roue max (cm/s)</label><input id="wheelSpeedMax" type="number" value="18.0" step="0.5"></div>
+</div>
+<p class="help">La vitesse désirée du stylo est calculée dans le repère X/Y, puis on résout l’inverse cinématique : v = Vstylo·eθ et ω = Vstylo·nθ/L.</p>
+</section>
+
+<section class="card"><h2>4. PID optionnel</h2>
+<p class="help">PID sur l’erreur latérale du stylo. Il ajoute une correction normale à la ligne avant le calcul inverse.</p>
+<div class="grid3">
+<div><label>Kp</label><input id="kp" type="number" value="0.30" step="0.05"></div>
+<div><label>Ki</label><input id="ki" type="number" value="0.00" step="0.01"></div>
+<div><label>Kd</label><input id="kd" type="number" value="0.08" step="0.01"></div>
+</div>
+<div style="margin-top:10px"><label>Limite intégrale</label><input id="iLimit" type="number" value="10" step="1"></div>
+</section>
+
+<section class="card"><h2>5. Moteurs virtuels</h2><div class="grid2">
+<div><label>Coef gauche cm/s/PWM</label><input id="coefL" type="number" value="0.080" step="0.001"></div>
+<div><label>Coef droite cm/s/PWM</label><input id="coefR" type="number" value="0.080" step="0.001"></div>
+<div><label>Échelle px/cm</label><input id="scale" type="number" value="8" step="0.5"></div>
+<div><label>Vitesse simulation</label><input id="simSpeed" type="number" value="1" min="0.25" max="10" step="0.25"></div>
+</div></section>
+
+<section class="card"><h2>6. Commandes</h2><div class="grid2">
+<button class="btn-green" onclick="start()">Lancer</button><button class="btn-orange" onclick="pauseResume()">Pause</button>
+<button class="btn-blue" onclick="stepOnce()">1 pas</button><button class="btn-red" onclick="resetAll()">Reset</button>
+<button class="btn-dark" onclick="centerView()">Recentrer</button><button class="btn-dark" onclick="clearTraces()">Effacer traces</button>
+<button class="btn-purple" onclick="downloadCsv()">Exporter CSV</button><button class="btn-yellow" onclick="fitView()">Fit</button>
+</div></section>
+
+<section class="card"><h2>Console</h2><div id="console" class="console"></div></section>
+</aside>
+
+<main>
+<div class="toolbar">
+<button class="btn-green" onclick="start()">Lancer</button><button class="btn-orange" onclick="pauseResume()">Pause</button><button class="btn-blue" onclick="stepOnce()">1 pas</button><button class="btn-red" onclick="resetAll()">Reset</button><button class="btn-dark" onclick="centerView()">Recentrer</button><button class="btn-purple" onclick="downloadCsv()">CSV</button><button class="btn-yellow" onclick="fitView()">Fit</button>
+</div>
+<div class="canvas-wrap">
+<canvas id="canvas" width="1400" height="880"></canvas>
+<div class="overlay">
+<div class="value"><span>État</span><span id="uiState" class="badge idle">IDLE</span></div>
+<div class="value"><span>Segment</span><span id="uiSegment">---</span></div>
+<div class="value"><span>Temps</span><span id="uiTime">0.00 s</span></div>
+<div class="value"><span>Stylo X/Y</span><span id="uiPen">0.00 / 0.00</span></div>
+<div class="value"><span>Base X/Y</span><span id="uiBase">-13.00 / 0.00</span></div>
+<div class="value"><span>θ robot</span><span id="uiTheta">0.0°</span></div>
+<div class="value"><span>Erreur latérale</span><span id="uiLatErr">0.00 cm</span></div>
+<div class="value"><span>Vstylo X/Y</span><span id="uiVPen">0.00 / 0.00</span></div>
+<div class="value"><span>v / ω robot</span><span id="uiVW">0.00 / 0.00</span></div>
+<div class="value"><span>V roues L/R</span><span id="uiWheelV">0.00 / 0.00</span></div>
+<div class="value"><span>PWM L/R</span><span id="uiPwm">0 / 0</span></div>
+<div class="value"><span>Erreur max</span><span id="uiMaxErr">0.00 cm</span></div>
+</div>
+</div>
+<section class="card" style="margin-top:14px">
+<h2>Analyse</h2><div id="analysis" class="ok">Lance la simulation. Ici, le robot calcule directement les vitesses de roues à partir de la vitesse souhaitée du stylo.</div>
+</section>
+</main>
+</div>
+
+<script>
+const $=id=>document.getElementById(id), canvas=$("canvas"), ctx=canvas.getContext("2d");
+function n(id){const v=parseFloat($(id).value);return Number.isFinite(v)?v:0}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function rad2deg(r){return r*180/Math.PI} function deg2rad(d){return d*Math.PI/180}
+function normRad(a){while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a}
+function fmt(v,d=2){return Number.isFinite(v)?v.toFixed(d):"---"}
+function log(m){$("console").textContent=`[${fmt(sim.t,2)}s] ${m}\n`+$("console").textContent}
+function pid(){return{kp:0,ki:0,kd:0,i:0,prev:0,first:true}} function pidReset(p){p.i=0;p.prev=0;p.first=true}
+function pidUpdate(p,e,dt,lim){p.i=clamp(p.i+e*dt,-lim,lim);let d=0;if(!p.first&&dt>0)d=(e-p.prev)/dt;p.prev=e;p.first=false;return p.kp*e+p.ki*p.i+p.kd*d}
+const view={cx:canvas.width/2,cy:canvas.height/2,drag:false,mx:0,my:0};
+const sim={running:false,paused:false,finished:false,t:0,dt:0.02,x:-13,y:0,theta:0,penX:0,penY:0,v:0,omega:0,vL:0,vR:0,pwmL:0,pwmR:0,vPenX:0,vPenY:0,latErr:0,maxLatErr:0,segIndex:0,segments:[],ideal:[],tracePen:[],traceBase:[],pid:pid()};
+function p(){return{d1:n("d1"),a1:n("a1"),d2:n("d2"),a2:n("a2"),d3:n("d3"),segTol:n("segTol"),b:n("wheelBase"),L:n("penOffset"),robotLength:n("robotLength"),robotWidth:n("robotWidth"),penSpeed:n("penSpeed"),kLine:n("kLine"),kTarget:n("kTarget"),lookahead:n("lookahead"),penSpeedMax:n("penSpeedMax"),wheelSpeedMax:n("wheelSpeedMax"),kp:n("kp"),ki:n("ki"),kd:n("kd"),iLimit:n("iLimit"),coefL:n("coefL"),coefR:n("coefR"),scale:n("scale"),simSpeed:n("simSpeed")}}
+function updatePen(){const P=p();sim.penX=sim.x+P.L*Math.cos(sim.theta);sim.penY=sim.y+P.L*Math.sin(sim.theta)}
+function buildIdeal(){const P=p();let pts=[],x=0,y=0,th=0;pts.push({x,y});x+=P.d1*Math.cos(th);y+=P.d1*Math.sin(th);pts.push({x,y});th+=deg2rad(P.a1);x+=P.d2*Math.cos(th);y+=P.d2*Math.sin(th);pts.push({x,y});th-=deg2rad(P.a2);x+=P.d3*Math.cos(th);y+=P.d3*Math.sin(th);pts.push({x,y});sim.ideal=pts;sim.segments=[];for(let i=0;i<pts.length-1;i++){const A=pts[i],B=pts[i+1],dx=B.x-A.x,dy=B.y-A.y,L=Math.hypot(dx,dy),ux=dx/L,uy=dy/L;sim.segments.push({A,B,L,ux,uy,nx:-uy,ny:ux,name:`SEG_${i+1}`})}}
+function resetAll(clear=true){buildIdeal();const P=p();sim.x=sim.ideal[0].x-P.L;sim.y=sim.ideal[0].y;sim.theta=0;updatePen();sim.running=false;sim.paused=false;sim.finished=false;sim.t=0;sim.v=sim.omega=sim.vL=sim.vR=sim.pwmL=sim.pwmR=sim.vPenX=sim.vPenY=0;sim.latErr=sim.maxLatErr=0;sim.segIndex=0;sim.tracePen=[{x:sim.penX,y:sim.penY,t:0}];sim.traceBase=[{x:sim.x,y:sim.y,t:0}];pidReset(sim.pid);if(clear)$("console").textContent="";$("analysis").className="ok";$("analysis").innerHTML="Reset. Le stylo est placé sur P0 et la base est derrière lui.";draw();ui()}
+function start(){resetAll(false);const P=p();sim.pid.kp=P.kp;sim.pid.ki=P.ki;sim.pid.kd=P.kd;sim.running=true;sim.paused=false;sim.finished=false;log("Commande directe du stylo lancee")}
+function pauseResume(){if(!sim.running)return;sim.paused=!sim.paused;log(sim.paused?"Pause":"Reprise")}
+function finish(){sim.running=false;sim.finished=true;sim.v=sim.omega=sim.vL=sim.vR=sim.pwmL=sim.pwmR=0;log("Sequence terminee");analyze()}
+function current(){return sim.segments[sim.segIndex]}
+function control(dt){
+ if(!sim.running||sim.paused||sim.finished){sim.v=sim.omega=sim.vL=sim.vR=sim.pwmL=sim.pwmR=sim.vPenX=sim.vPenY=0;return}
+ const P=p(), s=current(); if(!s){finish();return}
+ const rx=sim.penX-s.A.x, ry=sim.penY-s.A.y;
+ const progress=rx*s.ux+ry*s.uy, lat=rx*s.nx+ry*s.ny; sim.latErr=lat; sim.maxLatErr=Math.max(sim.maxLatErr,Math.abs(lat));
+ if(progress>=s.L-P.segTol){sim.segIndex++;pidReset(sim.pid); if(sim.segIndex>=sim.segments.length){finish();return} log("Segment "+(sim.segIndex+1)); return}
+ // Point cible sur la ligne + composante de retour normal vers la ligne.
+ const look=clamp(progress+P.lookahead,0,s.L), tx=s.A.x+look*s.ux, ty=s.A.y+look*s.uy;
+ const errX=tx-sim.penX, errY=ty-sim.penY;
+ const pidNormal=pidUpdate(sim.pid,lat,dt,P.iLimit);
+ let vpx=P.penSpeed*s.ux + P.kTarget*errX - (P.kLine*lat + pidNormal)*s.nx;
+ let vpy=P.penSpeed*s.uy + P.kTarget*errY - (P.kLine*lat + pidNormal)*s.ny;
+ const mag=Math.hypot(vpx,vpy); if(mag>P.penSpeedMax){vpx*=P.penSpeedMax/mag;vpy*=P.penSpeedMax/mag}
+ sim.vPenX=vpx; sim.vPenY=vpy;
+ // Inverse cinématique du point stylo.
+ // Vpen = v * e_theta + L * omega * n_theta
+ // donc v = Vpen · e_theta et omega = (Vpen · n_theta) / L
+ const ex=Math.cos(sim.theta), ey=Math.sin(sim.theta), nx=-Math.sin(sim.theta), ny=Math.cos(sim.theta);
+ let v=vpx*ex+vpy*ey;
+ let omega=(vpx*nx+vpy*ny)/P.L;
+ let vL=v-omega*P.b/2, vR=v+omega*P.b/2;
+ vL=clamp(vL,-P.wheelSpeedMax,P.wheelSpeedMax); vR=clamp(vR,-P.wheelSpeedMax,P.wheelSpeedMax);
+ sim.vL=vL;sim.vR=vR;sim.v=(vL+vR)/2;sim.omega=(vR-vL)/P.b;sim.pwmL=Math.round(vL/P.coefL);sim.pwmR=Math.round(vR/P.coefR)
+}
+function physics(dt){const P=p();const dL=sim.vL*dt,dR=sim.vR*dt,dC=(dL+dR)/2,dTh=(dR-dL)/P.b,mid=sim.theta+dTh/2;sim.x+=dC*Math.cos(mid);sim.y+=dC*Math.sin(mid);sim.theta=normRad(sim.theta+dTh);updatePen();let lp=sim.tracePen.at(-1);if(!lp||Math.hypot(sim.penX-lp.x,sim.penY-lp.y)>0.02)sim.tracePen.push({x:sim.penX,y:sim.penY,t:sim.t});let lb=sim.traceBase.at(-1);if(!lb||Math.hypot(sim.x-lb.x,sim.y-lb.y)>0.02)sim.traceBase.push({x:sim.x,y:sim.y,t:sim.t})}
+function stepOnce(){if(!sim.running){start();sim.paused=true}control(sim.dt);physics(sim.dt);sim.t+=sim.dt;draw();ui()}
+function tick(){const P=p();if(sim.running&&!sim.paused&&!sim.finished){for(let i=0;i<Math.max(1,Math.round(P.simSpeed));i++){control(sim.dt);physics(sim.dt);sim.t+=sim.dt}}draw();ui();requestAnimationFrame(tick)}
+function sc(){return Math.max(1,n("scale"))} function w2c(x,y){const S=sc();return{x:view.cx+x*S,y:view.cy-y*S}}
+function drawGrid(){ctx.clearRect(0,0,canvas.width,canvas.height);const S=sc(),step=5*S;ctx.strokeStyle="rgba(148,163,184,.14)";ctx.lineWidth=1;for(let x=view.cx%step;x<canvas.width;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke()}for(let y=view.cy%step;y<canvas.height;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke()}ctx.strokeStyle="rgba(56,189,248,.45)";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,view.cy);ctx.lineTo(canvas.width,view.cy);ctx.stroke();ctx.beginPath();ctx.moveTo(view.cx,0);ctx.lineTo(view.cx,canvas.height);ctx.stroke()}
+function poly(pts,color,width=2,dash=false){if(pts.length<2)return;ctx.save();ctx.strokeStyle=color;ctx.lineWidth=width;if(dash)ctx.setLineDash([8,8]);ctx.beginPath();let q=w2c(pts[0].x,pts[0].y);ctx.moveTo(q.x,q.y);for(let i=1;i<pts.length;i++){q=w2c(pts[i].x,pts[i].y);ctx.lineTo(q.x,q.y)}ctx.stroke();ctx.restore()}
+function drawRobot(){const P=p(),S=sc(),base=w2c(sim.x,sim.y),pen=w2c(sim.penX,sim.penY);ctx.save();ctx.translate(base.x,base.y);ctx.rotate(-sim.theta);ctx.fillStyle="rgba(56,189,248,.20)";ctx.strokeStyle="#38bdf8";ctx.lineWidth=2;ctx.beginPath();ctx.rect(-4*S,-P.robotWidth*S/2,(P.robotLength+4)*S,P.robotWidth*S);ctx.fill();ctx.stroke();ctx.strokeStyle="#e5e7eb";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(0,-P.b*S/2);ctx.lineTo(0,P.b*S/2);ctx.stroke();ctx.strokeStyle="#facc15";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(P.L*S,0);ctx.stroke();ctx.restore();ctx.fillStyle="#38bdf8";ctx.beginPath();ctx.arc(base.x,base.y,5,0,2*Math.PI);ctx.fill();ctx.fillStyle="#ef4444";ctx.beginPath();ctx.arc(pen.x,pen.y,6,0,2*Math.PI);ctx.fill()}
+function draw(){drawGrid();poly(sim.ideal,"#22c55e",2.5,true);sim.ideal.forEach((pt,i)=>{const q=w2c(pt.x,pt.y);ctx.fillStyle="#22c55e";ctx.beginPath();ctx.arc(q.x,q.y,5,0,2*Math.PI);ctx.fill();ctx.font="12px Consolas";ctx.fillText("P"+i,q.x+7,q.y-7)});poly(sim.traceBase,"rgba(56,189,248,.9)",2);poly(sim.tracePen,"#ef4444",2.8);drawRobot()}
+function ui(){const st=$("uiState");if(sim.finished){st.textContent="FINISHED";st.className="badge done"}else if(sim.running&&!sim.paused){st.textContent="RUNNING";st.className="badge run"}else if(sim.running&&sim.paused){st.textContent="PAUSE";st.className="badge pause"}else{st.textContent="IDLE";st.className="badge idle"}$("uiSegment").textContent=sim.finished?"FIN":(current()?.name||"---");$("uiTime").textContent=fmt(sim.t,2)+" s";$("uiPen").textContent=`${fmt(sim.penX,2)} / ${fmt(sim.penY,2)} cm`;$("uiBase").textContent=`${fmt(sim.x,2)} / ${fmt(sim.y,2)} cm`;$("uiTheta").textContent=fmt(rad2deg(sim.theta),1)+"°";$("uiLatErr").textContent=fmt(sim.latErr,2)+" cm";$("uiVPen").textContent=`${fmt(sim.vPenX,2)} / ${fmt(sim.vPenY,2)}`;$("uiVW").textContent=`${fmt(sim.v,2)} / ${fmt(sim.omega,2)}`;$("uiWheelV").textContent=`${fmt(sim.vL,2)} / ${fmt(sim.vR,2)}`;$("uiPwm").textContent=`${sim.pwmL} / ${sim.pwmR}`;$("uiMaxErr").textContent=fmt(sim.maxLatErr,2)+" cm"}
+function analyze(){const final=sim.tracePen.at(-1), tgt=sim.ideal.at(-1), err=Math.hypot(final.x-tgt.x,final.y-tgt.y);let cls=sim.maxLatErr<0.6?"ok":sim.maxLatErr<1.5?"warn":"bad";$("analysis").className=cls;$("analysis").innerHTML=`<strong>Analyse commande directe du stylo</strong><br>Erreur latérale max : ${fmt(sim.maxLatErr,2)} cm<br>Erreur finale : ${fmt(err,2)} cm<br>Temps : ${fmt(sim.t,2)} s<br><br>Cette méthode calcule d’abord la vitesse voulue du stylo, puis en déduit les vitesses des roues. Les roues ne tournent pas à la même vitesse quand il faut changer de direction.`}
+function clearTraces(){sim.tracePen=[];sim.traceBase=[];updatePen();sim.tracePen.push({x:sim.penX,y:sim.penY,t:sim.t});sim.traceBase.push({x:sim.x,y:sim.y,t:sim.t});log("Traces effacees")}
+function centerView(){view.cx=canvas.width/2;view.cy=canvas.height/2}function fitView(){let pts=[...sim.ideal,...sim.tracePen,...sim.traceBase];let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;pts.forEach(p=>{minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y)});const S=Math.min(canvas.width/(maxX-minX+20),canvas.height/(maxY-minY+20));$("scale").value=clamp(S,2,40).toFixed(2);view.cx=canvas.width/2-((minX+maxX)/2)*sc();view.cy=canvas.height/2+((minY+maxY)/2)*sc()}
+function downloadCsv(){let csv="t,pen_x,pen_y,base_x,base_y,theta_deg,vL,vR,pwmL,pwmR,latErr\n";const L=Math.max(sim.tracePen.length,sim.traceBase.length);for(let i=0;i<L;i++){const pp=sim.tracePen[Math.min(i,sim.tracePen.length-1)],bb=sim.traceBase[Math.min(i,sim.traceBase.length-1)];csv+=`${pp.t},${pp.x},${pp.y},${bb.x},${bb.y},${rad2deg(sim.theta)},${sim.vL},${sim.vR},${sim.pwmL},${sim.pwmR},${sim.latErr}\n`}const blob=new Blob([csv],{type:"text/csv"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="drawbot_inverse_kinematics_trace.csv";a.click();URL.revokeObjectURL(url)}
+canvas.addEventListener("mousedown",e=>{view.drag=true;view.mx=e.clientX;view.my=e.clientY});window.addEventListener("mouseup",()=>view.drag=false);window.addEventListener("mousemove",e=>{if(!view.drag)return;view.cx+=e.clientX-view.mx;view.cy+=e.clientY-view.my;view.mx=e.clientX;view.my=e.clientY});canvas.addEventListener("wheel",e=>{e.preventDefault();$("scale").value=clamp(sc()*(e.deltaY<0?1.12:.88),1,60).toFixed(2)},{passive:false});window.addEventListener("keydown",e=>{if(["INPUT","TEXTAREA"].includes(e.target.tagName))return;if(e.code==="Space"){e.preventDefault();pauseResume()}if(e.key.toLowerCase()==="r")resetAll();if(e.key.toLowerCase()==="s")start()});
+resetAll();log("Simulateur V3 pret : inverse cinematique du stylo.");tick();
+</script>
+</body>
+</html>
