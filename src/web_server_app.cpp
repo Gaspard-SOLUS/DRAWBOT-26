@@ -11,6 +11,7 @@
 #include "sensors.h"
 #include "logger.h"
 #include "s2_escalier.h"
+#include "s2_cercle.h"
 
 static const char* DRAWBOT_AP_SSID = "DRAWBOT_#S4S25-G-2314";
 static const char* DRAWBOT_AP_PASS = "!12345678!";
@@ -173,34 +174,47 @@ static void readS2EscalierArgs(S2Escalier::Config& cfg) {
   if (hasNonEmptyArg("dist2Cm")) cfg.dist2Cm = server.arg("dist2Cm").toFloat();
   if (hasNonEmptyArg("dist3Cm")) cfg.dist3Cm = server.arg("dist3Cm").toFloat();
 
+  // Compatibilite avec les anciens noms utilises par la page initiale.
+  if (hasNonEmptyArg("d1")) cfg.dist1Cm = server.arg("d1").toFloat();
+  if (hasNonEmptyArg("d2")) cfg.dist2Cm = server.arg("d2").toFloat();
+  if (hasNonEmptyArg("d3")) cfg.dist3Cm = server.arg("d3").toFloat();
+
   if (hasNonEmptyArg("wheelBaseCm")) cfg.wheelBaseCm = server.arg("wheelBaseCm").toFloat();
   if (hasNonEmptyArg("penOffsetCm")) cfg.penOffsetCm = server.arg("penOffsetCm").toFloat();
+
+  // La page precedente envoyait penSpeedCms. Dans cette version, c'est lineSpeedCms.
+  if (hasNonEmptyArg("lineSpeedCms")) cfg.lineSpeedCms = server.arg("lineSpeedCms").toFloat();
+  if (hasNonEmptyArg("penSpeedCms")) cfg.lineSpeedCms = server.arg("penSpeedCms").toFloat();
   if (hasNonEmptyArg("slowZoneCm")) cfg.slowZoneCm = server.arg("slowZoneCm").toFloat();
   if (hasNonEmptyArg("endToleranceCm")) cfg.endToleranceCm = server.arg("endToleranceCm").toFloat();
+  if (hasNonEmptyArg("cornerPauseMs")) cfg.cornerPauseMs = (unsigned long)server.arg("cornerPauseMs").toInt();
 
   if (hasNonEmptyArg("minPwm")) cfg.minPwm = server.arg("minPwm").toInt();
   if (hasNonEmptyArg("maxPwm")) cfg.maxPwm = server.arg("maxPwm").toInt();
   if (hasNonEmptyArg("maxWheelSpeedCms")) cfg.maxWheelSpeedCms = server.arg("maxWheelSpeedCms").toFloat();
+  if (hasNonEmptyArg("pwmRampStep")) cfg.pwmRampStep = server.arg("pwmRampStep").toInt();
 
-  if (hasNonEmptyArg("speedA")) cfg.pidA.penSpeedCms = server.arg("speedA").toFloat();
-  if (hasNonEmptyArg("kpA")) cfg.pidA.kpLat = server.arg("kpA").toFloat();
-  if (hasNonEmptyArg("kiA")) cfg.pidA.kiLat = server.arg("kiA").toFloat();
-  if (hasNonEmptyArg("kdA")) cfg.pidA.kdLat = server.arg("kdA").toFloat();
-  if (hasNonEmptyArg("maxCorrA")) cfg.pidA.maxLatCorrectionCms = server.arg("maxCorrA").toFloat();
+  // Ancien PID lateral : on le mappe vers le maintien de cap si la vieille page l'envoie encore.
+  if (hasNonEmptyArg("kpHeading")) cfg.kpHeading = server.arg("kpHeading").toFloat();
+  if (hasNonEmptyArg("kiHeading")) cfg.kiHeading = server.arg("kiHeading").toFloat();
+  if (hasNonEmptyArg("kdHeading")) cfg.kdHeading = server.arg("kdHeading").toFloat();
+  if (hasNonEmptyArg("maxOmegaRadS")) cfg.maxOmegaRadS = server.arg("maxOmegaRadS").toFloat();
+  if (hasNonEmptyArg("headingIntegralLimit")) cfg.headingIntegralLimit = server.arg("headingIntegralLimit").toFloat();
 
-  if (hasNonEmptyArg("speedB")) cfg.pidB.penSpeedCms = server.arg("speedB").toFloat();
-  if (hasNonEmptyArg("kpB")) cfg.pidB.kpLat = server.arg("kpB").toFloat();
-  if (hasNonEmptyArg("kiB")) cfg.pidB.kiLat = server.arg("kiB").toFloat();
-  if (hasNonEmptyArg("kdB")) cfg.pidB.kdLat = server.arg("kdB").toFloat();
-  if (hasNonEmptyArg("maxCorrB")) cfg.pidB.maxLatCorrectionCms = server.arg("maxCorrB").toFloat();
+  if (hasNonEmptyArg("kpLat")) cfg.kpHeading = server.arg("kpLat").toFloat();
+  if (hasNonEmptyArg("kiLat")) cfg.kiHeading = server.arg("kiLat").toFloat();
+  if (hasNonEmptyArg("kdLat")) cfg.kdHeading = server.arg("kdLat").toFloat();
+  if (hasNonEmptyArg("maxLatCorrectionCms")) cfg.maxOmegaRadS = server.arg("maxLatCorrectionCms").toFloat();
+  if (hasNonEmptyArg("integralLimit")) cfg.headingIntegralLimit = server.arg("integralLimit").toFloat();
 
-  if (hasNonEmptyArg("integralLimit")) cfg.integralLimit = server.arg("integralLimit").toFloat();
+  if (hasNonEmptyArg("pivotSlowPwm")) cfg.pivotSlowPwm = server.arg("pivotSlowPwm").toInt();
+  if (hasNonEmptyArg("pivotRatio")) cfg.pivotRatio = server.arg("pivotRatio").toFloat();
+  if (hasNonEmptyArg("pivotMinPwm")) cfg.pivotMinPwm = server.arg("pivotMinPwm").toInt();
+  if (hasNonEmptyArg("pivotMaxPwm")) cfg.pivotMaxPwm = server.arg("pivotMaxPwm").toInt();
+  if (hasNonEmptyArg("pivotAngleToleranceDeg")) cfg.pivotAngleToleranceDeg = server.arg("pivotAngleToleranceDeg").toFloat();
+  if (hasNonEmptyArg("pivotSlowdownDeg")) cfg.pivotSlowdownDeg = server.arg("pivotSlowdownDeg").toFloat();
+
   if (hasNonEmptyArg("headingSource")) cfg.headingSource = server.arg("headingSource").toInt();
-
-  // Compatibilite avec l'ancienne page qui envoyait d1/d2/d3
-  if (hasNonEmptyArg("d1")) cfg.dist1Cm = server.arg("d1").toFloat();
-  if (hasNonEmptyArg("d2")) cfg.dist2Cm = server.arg("d2").toFloat();
-  if (hasNonEmptyArg("d3")) cfg.dist3Cm = server.arg("d3").toFloat();
 }
 
 static void handleS2EscalierStart() {
@@ -209,7 +223,7 @@ static void handleS2EscalierStart() {
   S2Escalier::setConfig(cfg);
   S2Escalier::start();
 
-  Logger::log("Demande sequence ESCALIER 2 PID");
+  Logger::log("Demande sequence ESCALIER : start");
   server.send(200, "text/plain", "S2_ESCALIER_STARTED");
 }
 
@@ -225,30 +239,86 @@ static void handleS2EscalierSet() {
   S2Escalier::Config cfg = S2Escalier::getConfig();
   readS2EscalierArgs(cfg);
   S2Escalier::setConfig(cfg);
-  server.send(200, "text/plain", "OK");
+  server.send(200, "text/plain", "S2_ESCALIER_CONFIG_SET");
 }
 
 static void handleS2EscalierSave() {
   S2Escalier::saveConfig();
-  server.send(200, "text/plain", "SAVED");
+  server.send(200, "text/plain", "S2_ESCALIER_CONFIG_SAVED");
 }
 
 static void handleS2EscalierStop() {
   S2Escalier::stop();
-  server.send(200, "text/plain", "STOPPED");
+  server.send(200, "text/plain", "S2_ESCALIER_STOPPED");
+}
+
+static void readS2CercleArgs(S2Cercle::Config& cfg) {
+  if (hasNonEmptyArg("radiusCm")) cfg.radiusCm = server.arg("radiusCm").toFloat();
+  if (hasNonEmptyArg("r")) cfg.radiusCm = server.arg("r").toFloat();
+  if (hasNonEmptyArg("radiusScale")) cfg.radiusScale = server.arg("radiusScale").toFloat();
+  if (hasNonEmptyArg("radiusOffsetCm")) cfg.radiusOffsetCm = server.arg("radiusOffsetCm").toFloat();
+
+  if (hasNonEmptyArg("wheelBaseCm")) cfg.wheelBaseCm = server.arg("wheelBaseCm").toFloat();
+  if (hasNonEmptyArg("penOffsetCm")) cfg.penOffsetCm = server.arg("penOffsetCm").toFloat();
+  if (hasNonEmptyArg("direction")) cfg.direction = server.arg("direction").toInt();
+  if (hasNonEmptyArg("outerWheelSpeedCms")) cfg.outerWheelSpeedCms = server.arg("outerWheelSpeedCms").toFloat();
+  if (hasNonEmptyArg("closureFactor")) cfg.closureFactor = server.arg("closureFactor").toFloat();
+  if (hasNonEmptyArg("stopTurnFactor")) cfg.stopTurnFactor = server.arg("stopTurnFactor").toFloat();
+  if (hasNonEmptyArg("endSlowdownEnabled")) cfg.endSlowdownEnabled = server.arg("endSlowdownEnabled").toInt();
+  if (hasNonEmptyArg("endSlowdownStart")) cfg.endSlowdownStart = server.arg("endSlowdownStart").toFloat();
+  if (hasNonEmptyArg("endSlowdownMinScale")) cfg.endSlowdownMinScale = server.arg("endSlowdownMinScale").toFloat();
+
+  if (hasNonEmptyArg("minPwm")) cfg.minPwm = server.arg("minPwm").toInt();
+  if (hasNonEmptyArg("maxPwm")) cfg.maxPwm = server.arg("maxPwm").toInt();
+  if (hasNonEmptyArg("pwmRampStep")) cfg.pwmRampStep = server.arg("pwmRampStep").toInt();
+
+  if (hasNonEmptyArg("kpSpeed")) cfg.kpSpeed = server.arg("kpSpeed").toFloat();
+  if (hasNonEmptyArg("kiSpeed")) cfg.kiSpeed = server.arg("kiSpeed").toFloat();
+  if (hasNonEmptyArg("kdSpeed")) cfg.kdSpeed = server.arg("kdSpeed").toFloat();
+  if (hasNonEmptyArg("integralLimit")) cfg.integralLimit = server.arg("integralLimit").toFloat();
+  if (hasNonEmptyArg("kFF")) cfg.kFF = server.arg("kFF").toFloat();
+  if (hasNonEmptyArg("minReliableSpeedCms")) cfg.minReliableSpeedCms = server.arg("minReliableSpeedCms").toFloat();
+  if (hasNonEmptyArg("pulsePeriodMs")) cfg.pulsePeriodMs = (unsigned long)server.arg("pulsePeriodMs").toInt();
+  if (hasNonEmptyArg("speedFilterAlpha")) cfg.speedFilterAlpha = server.arg("speedFilterAlpha").toFloat();
+  if (hasNonEmptyArg("maxPidCorrectionPwm")) cfg.maxPidCorrectionPwm = server.arg("maxPidCorrectionPwm").toFloat();
+  if (hasNonEmptyArg("speedDeadbandCms")) cfg.speedDeadbandCms = server.arg("speedDeadbandCms").toFloat();
+  if (hasNonEmptyArg("ratioTrimKp")) cfg.ratioTrimKp = server.arg("ratioTrimKp").toFloat();
+  if (hasNonEmptyArg("maxRatioTrimPwm")) cfg.maxRatioTrimPwm = server.arg("maxRatioTrimPwm").toFloat();
 }
 
 static void handleS2CercleStart() {
-  float radius = server.hasArg("r") ? server.arg("r").toFloat() : 10.0f;
-  int segments = server.hasArg("n") ? server.arg("n").toInt() : 36;
-  int pwm = server.hasArg("pwm") ? server.arg("pwm").toInt() : 170;
+  S2Cercle::Config cfg = S2Cercle::getConfig();
+  readS2CercleArgs(cfg);
+  S2Cercle::setConfig(cfg);
+  S2Cercle::start();
 
-  Logger::log("Demande sequence CERCLE");
-  Logger::log("rayon=" + String(radius, 1) +
-              " segments=" + String(segments) +
-              " pwm=" + String(pwm));
+  Logger::log("Demande sequence CERCLE : start");
+  server.send(200, "text/plain", "S2_CERCLE_STARTED");
+}
 
-  server.send(200, "text/plain", "S2_CERCLE_START");
+static void handleS2CercleConfig() {
+  server.send(200, "application/json", S2Cercle::configJson());
+}
+
+static void handleS2CercleStatus() {
+  server.send(200, "application/json", S2Cercle::statusJson());
+}
+
+static void handleS2CercleSet() {
+  S2Cercle::Config cfg = S2Cercle::getConfig();
+  readS2CercleArgs(cfg);
+  S2Cercle::setConfig(cfg);
+  server.send(200, "text/plain", "S2_CERCLE_CONFIG_SET");
+}
+
+static void handleS2CercleSave() {
+  S2Cercle::saveConfig();
+  server.send(200, "text/plain", "S2_CERCLE_CONFIG_SAVED");
+}
+
+static void handleS2CercleStop() {
+  S2Cercle::stop();
+  server.send(200, "text/plain", "S2_CERCLE_STOPPED");
 }
 
 static void handleS2RoseStart() {
@@ -296,6 +366,11 @@ namespace WebApp {
     server.on("/api/s2/escalier/save", handleS2EscalierSave);
     server.on("/api/s2/escalier/stop", handleS2EscalierStop);
     server.on("/api/s2/cercle/start", handleS2CercleStart);
+    server.on("/api/s2/cercle/config", handleS2CercleConfig);
+    server.on("/api/s2/cercle/status", handleS2CercleStatus);
+    server.on("/api/s2/cercle/set", handleS2CercleSet);
+    server.on("/api/s2/cercle/save", handleS2CercleSave);
+    server.on("/api/s2/cercle/stop", handleS2CercleStop);
     server.on("/api/s2/rose/start", handleS2RoseStart);
 
     server.begin();
