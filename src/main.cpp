@@ -12,6 +12,7 @@
 #include "web_server_app.h"
 #include "soutenance2.h"
 #include "pen_inverse_follower.h"
+#include "motor_calibration.h"
 
 // ==================================================
 // TIMERS
@@ -46,6 +47,8 @@ void setup() {
   Soutenance2::begin();
   PenInverseFollower::begin();
 
+  MotorCalibration::begin();
+
   Logger::log("Initialisation terminee");
 }
 
@@ -62,6 +65,7 @@ void loop() {
     Odometry::update(now);
     Soutenance2::update(now, dt);
     PenInverseFollower::update(now, dt);
+    MotorCalibration::update(now);
   }
 
   Teleplot::update(now);

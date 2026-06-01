@@ -53,12 +53,11 @@ namespace Odometry {
     float dCenter = (dL + dR) * 0.5f;
     float dTheta = (dR - dL) / WHEEL_BASE_CM;
 
-    odometryState.thetaRad += dTheta;
-
-    float thetaMid = odometryState.thetaRad - dTheta * 0.5f;
+    float thetaMid = odometryState.thetaRad + dTheta * 0.5f;
 
     odometryState.xCm += dCenter * cos(thetaMid);
     odometryState.yCm += dCenter * sin(thetaMid);
+    odometryState.thetaRad += dTheta;
 
     odometryState.penXCm = odometryState.xCm + PEN_OFFSET_CM * cos(odometryState.thetaRad);
     odometryState.penYCm = odometryState.yCm + PEN_OFFSET_CM * sin(odometryState.thetaRad);
@@ -68,7 +67,7 @@ namespace Odometry {
     lastOdoTime = now;
   }
 
-  void reset() {
+  void resetPose(float xCm, float yCm, float thetaRad) {
     resetEncoders();
 
     lastDistL = 0.0f;
@@ -78,13 +77,20 @@ namespace Odometry {
     odometryState.speedLeftCms = 0.0f;
     odometryState.speedRightCms = 0.0f;
 
-    odometryState.xCm = 0.0f;
-    odometryState.yCm = 0.0f;
-    odometryState.thetaRad = 0.0f;
+    odometryState.xCm = xCm;
+    odometryState.yCm = yCm;
+    odometryState.thetaRad = thetaRad;
 
-    odometryState.penXCm = PEN_OFFSET_CM;
-    odometryState.penYCm = 0.0f;
+    odometryState.penXCm = odometryState.xCm + PEN_OFFSET_CM * cos(odometryState.thetaRad);
+    odometryState.penYCm = odometryState.yCm + PEN_OFFSET_CM * sin(odometryState.thetaRad);
 
+    Logger::log("Odometry resetPose : x=" + String(xCm, 2) +
+                " y=" + String(yCm, 2) +
+                " theta=" + String(normalizeAngleDeg(radToDeg(thetaRad)), 1) + " deg");
+  }
+
+  void reset() {
+    resetPose(0.0f, 0.0f, 0.0f);
     Logger::log("Odometrie remise a zero");
   }
 }

@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drawbot - Simulation petit cercle V2</title>
+<style>
+:root {
+  --bg:#0f172a; --panel:#020617; --card:#111827; --border:#1e293b;
+  --text:#e5e7eb; --muted:#94a3b8; --accent:#38bdf8; --green:#22c55e;
+  --red:#ef4444; --orange:#f97316; --purple:#a855f7; --yellow:#facc15;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+.app{display:grid;grid-template-columns:420px 1fr;min-height:100vh}
+.sidebar{background:var(--panel);border-right:1px solid var(--border);padding:18px;height:100vh;overflow-y:auto}
+main{padding:18px;overflow:hidden}
+h1{font-size:24px;margin:0 0 6px}
+h2{font-size:17px;margin:0 0 12px}
+h3{font-size:14px;color:var(--muted);margin:14px 0 8px}
+p,.help{color:var(--muted);line-height:1.42;font-size:13px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:0 10px 28px rgba(0,0,0,.25)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+label{display:block;color:var(--muted);font-size:13px;margin-bottom:5px}
+input,select{width:100%;border-radius:10px;border:1px solid var(--border);background:#020617;color:var(--text);padding:9px;font-size:14px}
+button{border:0;border-radius:12px;padding:11px 12px;color:white;font-weight:bold;cursor:pointer;width:100%}
+.btn-blue{background:var(--accent);color:#082f49}.btn-green{background:var(--green)}
+.btn-red{background:var(--red)}.btn-orange{background:var(--orange)}
+.btn-purple{background:var(--purple)}.btn-dark{background:#334155}.btn-yellow{background:var(--yellow);color:#422006}
+.toolbar{display:grid;grid-template-columns:repeat(7,minmax(90px,1fr));gap:10px;margin-bottom:14px}
+.canvas-wrap{background:var(--panel);border:1px solid var(--border);border-radius:18px;overflow:hidden;height:calc(100vh - 210px);min-height:560px;position:relative}
+canvas{display:block;width:100%;height:100%;background:#020617}
+.overlay{position:absolute;left:16px;top:16px;background:rgba(2,6,23,.86);border:1px solid var(--border);border-radius:14px;padding:12px;min-width:340px;backdrop-filter:blur(8px)}
+.value{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(148,163,184,.15);padding:7px 0;font-size:13px}
+.value:last-child{border-bottom:0}
+.value span:first-child{color:var(--muted)}
+.value span:last-child{font-family:Consolas,monospace;font-weight:bold;text-align:right}
+.badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:bold}
+.run{background:var(--green);color:#052e16}.idle{background:#64748b}.pause{background:var(--orange);color:#431407}.done{background:var(--accent);color:#082f49}
+.console{background:#020617;border:1px solid var(--border);border-radius:14px;padding:10px;height:145px;overflow:auto;color:#a7f3d0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap}
+.ok{background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.35);border-radius:12px;padding:10px;color:#bbf7d0;font-size:13px}
+.warn{background:rgba(249,115,22,.12);border:1px solid rgba(249,115,22,.35);border-radius:12px;padding:10px;color:#fed7aa;font-size:13px}
+.bad{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:12px;padding:10px;color:#fecaca;font-size:13px}
+@media(max-width:1100px){.app{grid-template-columns:1fr}.sidebar{height:auto;border-right:0;border-bottom:1px solid var(--border)}.toolbar{grid-template-columns:repeat(2,1fr)}.canvas-wrap{height:70vh}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <h1>Simulation petit cercle V2</h1>
+  <p>
+    Correction principale : le robot démarre maintenant avec son axe aligné sur la tangente du cercle.
+    La V1 démarrait avec θ = 0° dans tous les cas, ce qui créait une grosse erreur initiale.
+  </p>
+
+  <section class="card">
+    <h2>1. Cercle demandé</h2>
+    <div class="grid2">
+      <div><label>Rayon cercle (cm)</label><input id="radius" type="number" value="5.0" step="0.1"></div>
+      <div><label>Segments</label><input id="segments" type="number" value="96" step="1"></div>
+      <div>
+        <label>Sens</label>
+        <select id="clockwise">
+          <option value="1">Horaire</option>
+          <option value="0">Antihoraire</option>
+        </select>
+      </div>
+      <div>
+        <label>Départ</label>
+        <select id="startMode">
+          <option value="bottom">Stylo en bas du cercle</option>
+          <option value="right">Stylo à droite du cercle</option>
+        </select>
+      </div>
+      <div>
+        <label>Orientation initiale</label>
+        <select id="initialHeadingMode">
+          <option value="tangent">Tangente automatique</option>
+          <option value="zero">Forcée à 0°</option>
+          <option value="manual">Manuelle</option>
+        </select>
+      </div>
+      <div><label>θ manuel (°)</label><input id="manualTheta" type="number" value="0" step="1"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. Géométrie robot</h2>
+    <div class="grid2">
+      <div><label>Écartement roues b (cm)</label><input id="wheelBase" type="number" value="8.3" step="0.1"></div>
+      <div><label>Offset stylo L (cm)</label><input id="penOffset" type="number" value="13.0" step="0.1"></div>
+      <div><label>Longueur robot (cm)</label><input id="robotLength" type="number" value="18" step="0.5"></div>
+      <div><label>Largeur robot (cm)</label><input id="robotWidth" type="number" value="10" step="0.5"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3. Suivi du stylo</h2>
+    <div class="grid2">
+      <div><label>Vitesse stylo (cm/s)</label><input id="penSpeed" type="number" value="0.7" step="0.1"></div>
+      <div><label>Lookahead (cm)</label><input id="lookahead" type="number" value="0.35" step="0.05"></div>
+      <div><label>Gain attraction cible</label><input id="targetGain" type="number" value="0.8" step="0.1"></div>
+      <div><label>Gain retour ligne</label><input id="lineGain" type="number" value="0.45" step="0.05"></div>
+      <div><label>Vitesse stylo max (cm/s)</label><input id="penSpeedMax" type="number" value="1.8" step="0.1"></div>
+      <div><label>Vitesse roue max (cm/s)</label><input id="wheelSpeedMax" type="number" value="4.0" step="0.1"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>4. PID correction normale</h2>
+    <div class="grid3">
+      <div><label>Kp</label><input id="kp" type="number" value="0.02" step="0.01"></div>
+      <div><label>Ki</label><input id="ki" type="number" value="0.00" step="0.01"></div>
+      <div><label>Kd</label><input id="kd" type="number" value="0.015" step="0.005"></div>
+    </div>
+    <div style="margin-top:10px"><label>Limite intégrale</label><input id="iLimit" type="number" value="5" step="1"></div>
+  </section>
+
+  <section class="card">
+    <h2>5. Contraintes moteurs</h2>
+    <div class="grid2">
+      <div><label>Autoriser recul</label>
+        <select id="allowReverse">
+          <option value="1">Oui</option>
+          <option value="0">Non</option>
+        </select>
+      </div>
+      <div>
+        <label>Modèle moteur</label>
+        <select id="motorModel">
+          <option value="ideal">Idéal pour comprendre</option>
+          <option value="realistic">PWM réaliste</option>
+        </select>
+      </div>
+      <div><label>Coef gauche cm/s/PWM</label><input id="coefL" type="number" value="0.080" step="0.001"></div>
+      <div><label>Coef droite cm/s/PWM</label><input id="coefR" type="number" value="0.080" step="0.001"></div>
+      <div><label>PWM minimum</label><input id="minPwm" type="number" value="150" step="1"></div>
+      <div><label>Rampe PWM / pas</label><input id="pwmSlewStep" type="number" value="4" step="1"></div>
+    </div>
+    <p class="help">
+      Commence avec le modèle idéal. Passe ensuite en PWM réaliste pour te rapprocher du robot réel.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>6. Simulation</h2>
+    <div class="grid2">
+      <button class="btn-green" onclick="start()">Lancer</button>
+      <button class="btn-orange" onclick="pauseResume()">Pause</button>
+      <button class="btn-blue" onclick="stepOnce()">1 pas</button>
+      <button class="btn-red" onclick="resetAll()">Reset</button>
+      <button class="btn-dark" onclick="centerView()">Recentrer</button>
+      <button class="btn-yellow" onclick="fitView()">Fit</button>
+    </div>
+    <div class="grid2" style="margin-top:10px">
+      <div><label>Échelle px/cm</label><input id="scale" type="number" value="12" step="0.5"></div>
+      <div><label>Vitesse simulation</label><input id="simSpeed" type="number" value="1" min="0.25" max="10" step="0.25"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Console</h2>
+    <div id="console" class="console"></div>
+  </section>
+</aside>
+
+<main>
+  <div class="toolbar">
+    <button class="btn-green" onclick="start()">Lancer</button>
+    <button class="btn-orange" onclick="pauseResume()">Pause</button>
+    <button class="btn-blue" onclick="stepOnce()">1 pas</button>
+    <button class="btn-red" onclick="resetAll()">Reset</button>
+    <button class="btn-dark" onclick="centerView()">Recentrer</button>
+    <button class="btn-yellow" onclick="fitView()">Fit</button>
+    <button class="btn-purple" onclick="downloadCsv()">CSV</button>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="canvas" width="1400" height="880"></canvas>
+    <div class="overlay">
+      <div class="value"><span>État</span><span id="uiState" class="badge idle">IDLE</span></div>
+      <div class="value"><span>Segment</span><span id="uiSegment">---</span></div>
+      <div class="value"><span>Temps</span><span id="uiTime">0.00 s</span></div>
+      <div class="value"><span>Stylo X/Y</span><span id="uiPen">0.00 / 0.00</span></div>
+      <div class="value"><span>Base X/Y</span><span id="uiBase">-13.00 / 0.00</span></div>
+      <div class="value"><span>θ robot</span><span id="uiTheta">0.0°</span></div>
+      <div class="value"><span>Erreur latérale</span><span id="uiLatErr">0.00 cm</span></div>
+      <div class="value"><span>V stylo X/Y</span><span id="uiVPen">0.00 / 0.00</span></div>
+      <div class="value"><span>v / ω robot</span><span id="uiVW">0.00 / 0.00</span></div>
+      <div class="value"><span>V roues L/R</span><span id="uiWheelV">0.00 / 0.00</span></div>
+      <div class="value"><span>PWM L/R</span><span id="uiPwm">0 / 0</span></div>
+      <div class="value"><span>Erreur max</span><span id="uiMaxErr">0.00 cm</span></div>
+    </div>
+  </div>
+
+  <section class="card" style="margin-top:14px">
+    <h2>Analyse</h2>
+    <div id="analysis" class="ok">
+      Lance la simulation. En V2, le robot démarre aligné sur la tangente du cercle.
+    </div>
+  </section>
+</main>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const canvas = $("canvas");
+const ctx = canvas.getContext("2d");
+
+function n(id){ const v=parseFloat($(id).value); return Number.isFinite(v)?v:0; }
+function s(id){ return $(id).value; }
+function bool(id){ return $(id).value === "1"; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+function rad2deg(r){ return r*180/Math.PI; }
+function deg2rad(d){ return d*Math.PI/180; }
+function normRad(a){ while(a>Math.PI)a-=2*Math.PI; while(a<-Math.PI)a+=2*Math.PI; return a; }
+function normDeg(a){ while(a<0)a+=360; while(a>=360)a-=360; return a; }
+function fmt(v,d=2){ return Number.isFinite(v)?v.toFixed(d):"---"; }
+function log(m){ $("console").textContent = `[${fmt(sim.t,2)}s] ${m}\n` + $("console").textContent; }
+
+function pid(){ return {kp:0,ki:0,kd:0,i:0,prev:0,first:true}; }
+function pidReset(p){ p.i=0;p.prev=0;p.first=true; }
+function pidUpdate(p,e,dt,lim){
+  p.i=clamp(p.i+e*dt,-lim,lim);
+  let d=0;
+  if(!p.first && dt>0)d=(e-p.prev)/dt;
+  p.prev=e;p.first=false;
+  return p.kp*e+p.ki*p.i+p.kd*d;
+}
+
+let view={cx:canvas.width/2,cy:canvas.height/2,drag:false,mx:0,my:0};
+
+let sim={
+  running:false,paused:false,finished:false,t:0,dt:0.02,
+  x:-13,y:0,theta:0,penX:0,penY:0,
+  v:0,omega:0,vL:0,vR:0,pwmL:0,pwmR:0,
+  vPenX:0,vPenY:0,latErr:0,maxLatErr:0,segIndex:0,
+  segments:[],ideal:[],tracePen:[],traceBase:[],pid:pid()
+};
+
+function P(){
+  return {
+    R:n("radius"), seg:Math.max(24,Math.round(n("segments"))),
+    clockwise:bool("clockwise"), startMode:s("startMode"),
+    initialHeadingMode:s("initialHeadingMode"), manualTheta:deg2rad(n("manualTheta")),
+    b:n("wheelBase"), L:n("penOffset"), robotLength:n("robotLength"), robotWidth:n("robotWidth"),
+    penSpeed:n("penSpeed"), lookahead:n("lookahead"), targetGain:n("targetGain"), lineGain:n("lineGain"),
+    penSpeedMax:n("penSpeedMax"), wheelSpeedMax:n("wheelSpeedMax"),
+    kp:n("kp"), ki:n("ki"), kd:n("kd"), iLimit:n("iLimit"),
+    allowReverse:bool("allowReverse"), motorModel:s("motorModel"),
+    coefL:n("coefL"), coefR:n("coefR"), minPwm:n("minPwm"), pwmSlewStep:n("pwmSlewStep"),
+    scale:n("scale"), simSpeed:n("simSpeed")
+  };
+}
+
+function updatePen(){
+  const p=P();
+  sim.penX=sim.x+p.L*Math.cos(sim.theta);
+  sim.penY=sim.y+p.L*Math.sin(sim.theta);
+}
+
+function addSegment(a,b){
+  const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy);
+  if(L<0.001)return;
+  sim.segments.push({A:a,B:b,L,ux:dx/L,uy:dy/L,nx:-dy/L,ny:dx/L,name:`SEG_${sim.segments.length+1}`});
+}
+
+function buildCircle(){
+  const p=P();
+  sim.ideal=[];
+  sim.segments=[];
+
+  let cx=0, cy=p.R, start=-Math.PI/2;
+  if(p.startMode==="right"){
+    cx=-p.R; cy=0; start=0;
+  }
+
+  const dir=p.clockwise ? -1 : 1;
+
+  for(let i=0;i<=p.seg;i++){
+    const a=start + dir*2*Math.PI*i/p.seg;
+    sim.ideal.push({x:cx+p.R*Math.cos(a), y:cy+p.R*Math.sin(a), angle:a});
+  }
+  for(let i=0;i<sim.ideal.length-1;i++) addSegment(sim.ideal[i],sim.ideal[i+1]);
+}
+
+function tangentHeadingAtStart(){
+  const p=P();
+  if(p.initialHeadingMode==="zero") return 0;
+  if(p.initialHeadingMode==="manual") return p.manualTheta;
+
+  if(sim.ideal.length >= 2){
+    const a=sim.ideal[0], b=sim.ideal[1];
+    return Math.atan2(b.y-a.y, b.x-a.x);
+  }
+  return 0;
+}
+
+function applyMinPwm(pwm){
+  if(pwm===0)return 0;
+  const p=P();
+  const sign=pwm>0?1:-1;
+  let a=Math.abs(pwm);
+  if(a<p.minPwm)a=p.minPwm;
+  if(a>255)a=255;
+  return sign*a;
+}
+
+function slew(current,target){
+  const step=Math.max(1,n("pwmSlewStep"));
+  if(target>current+step)return current+step;
+  if(target<current-step)return current-step;
+  return target;
+}
+
+function resetAll(clear=true){
+  buildCircle();
+  const p=P();
+  const start=sim.ideal[0] || {x:0,y:0};
+
+  sim.theta=tangentHeadingAtStart();
+  sim.x=start.x-p.L*Math.cos(sim.theta);
+  sim.y=start.y-p.L*Math.sin(sim.theta);
+  updatePen();
+
+  sim.running=false;sim.paused=false;sim.finished=false;sim.t=0;
+  sim.v=sim.omega=sim.vL=sim.vR=0;
+  sim.pwmL=sim.pwmR=0;
+  sim.vPenX=sim.vPenY=0;sim.latErr=0;sim.maxLatErr=0;sim.segIndex=0;
+  sim.tracePen=[{x:sim.penX,y:sim.penY,t:0}];
+  sim.traceBase=[{x:sim.x,y:sim.y,t:0}];
+  sim.pid=pid();
+  if(clear)$("console").textContent="";
+  $("analysis").className="ok";
+  $("analysis").innerHTML=`Reset. θ initial = ${fmt(normDeg(rad2deg(sim.theta)),1)}°.`;
+  draw();ui();
+}
+
+function start(){
+  resetAll(false);
+  const p=P();
+  sim.pid.kp=p.kp; sim.pid.ki=p.ki; sim.pid.kd=p.kd;
+  pidReset(sim.pid);
+  sim.running=true; sim.paused=false; sim.finished=false;
+  log("Simulation cercle V2 lancée");
+}
+
+function pauseResume(){
+  if(!sim.running)return;
+  sim.paused=!sim.paused;
+  log(sim.paused?"Pause":"Reprise");
+}
+
+function finish(){
+  sim.running=false;sim.finished=true;
+  sim.v=sim.omega=sim.vL=sim.vR=sim.pwmL=sim.pwmR=0;
+  log("Cercle terminé");
+  analyze();
+}
+
+function current(){return sim.segments[sim.segIndex];}
+
+function control(dt){
+  if(!sim.running||sim.paused||sim.finished){
+    sim.v=sim.omega=sim.vL=sim.vR=0;
+    sim.pwmL=slew(sim.pwmL,0); sim.pwmR=slew(sim.pwmR,0);
+    return;
+  }
+
+  const p=P(), seg=current();
+  if(!seg){finish();return;}
+
+  const rx=sim.penX-seg.A.x, ry=sim.penY-seg.A.y;
+  const progress=rx*seg.ux+ry*seg.uy;
+  const lat=rx*seg.nx+ry*seg.ny;
+  sim.latErr=lat;
+  sim.maxLatErr=Math.max(sim.maxLatErr,Math.abs(lat));
+
+  if(progress>=seg.L-0.03){
+    sim.segIndex++;
+    pidReset(sim.pid);
+    if(sim.segIndex>=sim.segments.length){finish();return;}
+    return;
+  }
+
+  const look=clamp(progress+p.lookahead,0,seg.L);
+  const tx=seg.A.x+look*seg.ux, ty=seg.A.y+look*seg.uy;
+  const errX=tx-sim.penX, errY=ty-sim.penY;
+
+  const normalCorr=p.lineGain*lat + pidUpdate(sim.pid,lat,dt,p.iLimit);
+
+  let vpx=p.penSpeed*seg.ux + p.targetGain*errX - normalCorr*seg.nx;
+  let vpy=p.penSpeed*seg.uy + p.targetGain*errY - normalCorr*seg.ny;
+
+  const mag=Math.hypot(vpx,vpy);
+  if(mag>p.penSpeedMax && mag>0.001){
+    vpx*=p.penSpeedMax/mag;
+    vpy*=p.penSpeedMax/mag;
+  }
+
+  sim.vPenX=vpx; sim.vPenY=vpy;
+
+  const eRx=Math.cos(sim.theta), eRy=Math.sin(sim.theta);
+  const nRx=-Math.sin(sim.theta), nRy=Math.cos(sim.theta);
+
+  let v=vpx*eRx + vpy*eRy;
+  let omega=(vpx*nRx + vpy*nRy)/p.L;
+
+  if(!p.allowReverse && v<0)v=0;
+
+  let vL=v-omega*p.b/2;
+  let vR=v+omega*p.b/2;
+
+  vL=clamp(vL,-p.wheelSpeedMax,p.wheelSpeedMax);
+  vR=clamp(vR,-p.wheelSpeedMax,p.wheelSpeedMax);
+
+  if(p.motorModel==="ideal"){
+    sim.vL=vL;
+    sim.vR=vR;
+    sim.pwmL=Math.round(vL/p.coefL);
+    sim.pwmR=Math.round(vR/p.coefR);
+  } else {
+    let pwmL=Math.round(vL/p.coefL);
+    let pwmR=Math.round(vR/p.coefR);
+    pwmL=applyMinPwm(pwmL);
+    pwmR=applyMinPwm(pwmR);
+    pwmL=slew(sim.pwmL,pwmL);
+    pwmR=slew(sim.pwmR,pwmR);
+    sim.pwmL=pwmL; sim.pwmR=pwmR;
+    sim.vL=pwmL*p.coefL;
+    sim.vR=pwmR*p.coefR;
+  }
+
+  sim.v=(sim.vL+sim.vR)/2;
+  sim.omega=(sim.vR-sim.vL)/p.b;
+}
+
+function physics(dt){
+  const p=P();
+  const dL=sim.vL*dt,dR=sim.vR*dt,dC=(dL+dR)/2,dTh=(dR-dL)/p.b,mid=sim.theta+dTh/2;
+  sim.x+=dC*Math.cos(mid);
+  sim.y+=dC*Math.sin(mid);
+  sim.theta=normRad(sim.theta+dTh);
+  updatePen();
+  const lp=sim.tracePen[sim.tracePen.length-1];
+  if(!lp||Math.hypot(sim.penX-lp.x,sim.penY-lp.y)>0.015)sim.tracePen.push({x:sim.penX,y:sim.penY,t:sim.t});
+  const lb=sim.traceBase[sim.traceBase.length-1];
+  if(!lb||Math.hypot(sim.x-lb.x,sim.y-lb.y)>0.015)sim.traceBase.push({x:sim.x,y:sim.y,t:sim.t});
+}
+
+function stepOnce(){
+  if(!sim.running){start();sim.paused=true;}
+  control(sim.dt);physics(sim.dt);sim.t+=sim.dt;draw();ui();
+}
+
+function tick(){
+  const p=P();
+  if(sim.running&&!sim.paused&&!sim.finished){
+    const steps=Math.max(1,Math.round(p.simSpeed));
+    for(let i=0;i<steps;i++){
+      control(sim.dt);physics(sim.dt);sim.t+=sim.dt;
+    }
+  }
+  draw();ui();
+  requestAnimationFrame(tick);
+}
+
+function scale(){return Math.max(1,n("scale"));}
+function w2c(x,y){const sc=scale();return{x:view.cx+x*sc,y:view.cy-y*sc};}
+function drawGrid(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const sc=scale(), step=5*sc;
+  ctx.strokeStyle="rgba(148,163,184,.14)";
+  ctx.lineWidth=1;
+  for(let x=view.cx%step;x<canvas.width;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.height);ctx.stroke();}
+  for(let y=view.cy%step;y<canvas.height;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();}
+  ctx.strokeStyle="rgba(56,189,248,.45)";
+  ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(0,view.cy);ctx.lineTo(canvas.width,view.cy);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(view.cx,0);ctx.lineTo(view.cx,canvas.height);ctx.stroke();
+}
+function poly(pts,color,width=2,dash=false){
+  if(pts.length<2)return;
+  ctx.save();ctx.strokeStyle=color;ctx.lineWidth=width;if(dash)ctx.setLineDash([8,8]);
+  ctx.beginPath();let q=w2c(pts[0].x,pts[0].y);ctx.moveTo(q.x,q.y);
+  for(let i=1;i<pts.length;i++){q=w2c(pts[i].x,pts[i].y);ctx.lineTo(q.x,q.y);}
+  ctx.stroke();ctx.restore();
+}
+function drawRobot(){
+  const p=P(),sc=scale(),base=w2c(sim.x,sim.y),pen=w2c(sim.penX,sim.penY);
+  ctx.save();ctx.translate(base.x,base.y);ctx.rotate(-sim.theta);
+  ctx.fillStyle="rgba(56,189,248,.20)";ctx.strokeStyle="#38bdf8";ctx.lineWidth=2;
+  ctx.beginPath();ctx.rect(-4*sc,-p.robotWidth*sc/2,(p.robotLength+4)*sc,p.robotWidth*sc);ctx.fill();ctx.stroke();
+  ctx.strokeStyle="#e5e7eb";ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(0,-p.b*sc/2);ctx.lineTo(0,p.b*sc/2);ctx.stroke();
+  ctx.strokeStyle="#facc15";ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(p.L*sc,0);ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle="#38bdf8";ctx.beginPath();ctx.arc(base.x,base.y,5,0,2*Math.PI);ctx.fill();
+  ctx.fillStyle="#ef4444";ctx.beginPath();ctx.arc(pen.x,pen.y,6,0,2*Math.PI);ctx.fill();
+}
+function draw(){
+  drawGrid();
+  poly(sim.ideal,"#22c55e",2.5,true);
+  poly(sim.traceBase,"rgba(56,189,248,.9)",2);
+  poly(sim.tracePen,"#ef4444",2.8);
+  drawRobot();
+}
+function ui(){
+  const st=$("uiState");
+  if(sim.finished){st.textContent="FINISHED";st.className="badge done";}
+  else if(sim.running&&!sim.paused){st.textContent="RUNNING";st.className="badge run";}
+  else if(sim.running&&sim.paused){st.textContent="PAUSE";st.className="badge pause";}
+  else{st.textContent="IDLE";st.className="badge idle";}
+  $("uiSegment").textContent=sim.finished?"FIN":(current()?.name||"---");
+  $("uiTime").textContent=fmt(sim.t,2)+" s";
+  $("uiPen").textContent=`${fmt(sim.penX,2)} / ${fmt(sim.penY,2)} cm`;
+  $("uiBase").textContent=`${fmt(sim.x,2)} / ${fmt(sim.y,2)} cm`;
+  $("uiTheta").textContent=fmt(normDeg(rad2deg(sim.theta)),1)+"°";
+  $("uiLatErr").textContent=fmt(sim.latErr,2)+" cm";
+  $("uiVPen").textContent=`${fmt(sim.vPenX,2)} / ${fmt(sim.vPenY,2)}`;
+  $("uiVW").textContent=`${fmt(sim.v,2)} / ${fmt(sim.omega,2)}`;
+  $("uiWheelV").textContent=`${fmt(sim.vL,2)} / ${fmt(sim.vR,2)}`;
+  $("uiPwm").textContent=`${sim.pwmL} / ${sim.pwmR}`;
+  $("uiMaxErr").textContent=fmt(sim.maxLatErr,2)+" cm";
+}
+function analyze(){
+  const final=sim.tracePen[sim.tracePen.length-1];
+  const start=sim.tracePen[0];
+  const closeErr=Math.hypot(final.x-start.x,final.y-start.y);
+  let cls=sim.maxLatErr<0.5?"ok":sim.maxLatErr<1.2?"warn":"bad";
+  $("analysis").className=cls;
+  $("analysis").innerHTML=`<strong>Analyse petit cercle V2</strong><br>Erreur latérale max : ${fmt(sim.maxLatErr,2)} cm<br>Erreur de fermeture : ${fmt(closeErr,2)} cm<br>Temps : ${fmt(sim.t,2)} s<br><br>Pour comprendre la géométrie, commence en modèle idéal. Ensuite passe en PWM réaliste et ajuste minPwm, rampe PWM et vitesse.`;
+}
+function centerView(){view.cx=canvas.width/2;view.cy=canvas.height/2;}
+function fitView(){
+  const pts=[...sim.ideal,...sim.tracePen,...sim.traceBase];
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  pts.forEach(p=>{minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);});
+  const sc=Math.min(canvas.width/(maxX-minX+20),canvas.height/(maxY-minY+20));
+  $("scale").value=clamp(sc,2,50).toFixed(2);
+  view.cx=canvas.width/2-((minX+maxX)/2)*scale();
+  view.cy=canvas.height/2+((minY+maxY)/2)*scale();
+}
+function downloadCsv(){
+  let csv="t,pen_x,pen_y,base_x,base_y,theta_deg,vL,vR,pwmL,pwmR,latErr\n";
+  const L=Math.max(sim.tracePen.length,sim.traceBase.length);
+  for(let i=0;i<L;i++){
+    const pp=sim.tracePen[Math.min(i,sim.tracePen.length-1)],bb=sim.traceBase[Math.min(i,sim.traceBase.length-1)];
+    csv+=`${pp.t},${pp.x},${pp.y},${bb.x},${bb.y},${rad2deg(sim.theta)},${sim.vL},${sim.vR},${sim.pwmL},${sim.pwmR},${sim.latErr}\n`;
+  }
+  const blob=new Blob([csv],{type:"text/csv"}),url=URL.createObjectURL(blob),a=document.createElement("a");
+  a.href=url;a.download="drawbot_small_circle_sim_v2.csv";a.click();URL.revokeObjectURL(url);
+}
+canvas.addEventListener("mousedown",e=>{view.drag=true;view.mx=e.clientX;view.my=e.clientY;});
+window.addEventListener("mouseup",()=>view.drag=false);
+window.addEventListener("mousemove",e=>{if(!view.drag)return;view.cx+=e.clientX-view.mx;view.cy+=e.clientY-view.my;view.mx=e.clientX;view.my=e.clientY;});
+canvas.addEventListener("wheel",e=>{e.preventDefault();$("scale").value=clamp(scale()*(e.deltaY<0?1.12:.88),1,60).toFixed(2);},{passive:false});
+
+resetAll();
+log("Simulateur petit cercle V2 prêt.");
+tick();
+</script>
+</body>
+</html>

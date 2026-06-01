@@ -11,6 +11,9 @@
 #include "sensors.h"
 #include "logger.h"
 #include "pen_inverse_follower.h"
+#include "page_s2_cercle.h"
+#include "trajectory_generator.h"
+#include "circle_trajectory_helper.h"
 
 // ==================================================
 // WIFI ESP32 EN POINT D'ACCES
@@ -73,7 +76,7 @@ static void handleSoutenance2Escalier() {
 }
 
 static void handleSoutenance2Cercle() {
-  server.send(200, "text/html", WebPages::soutenance2Cercle());
+  server.send(200, "text/html", PageS2Cercle::html());
 }
 
 static void handleSoutenance2RoseDesVents() {
@@ -93,6 +96,8 @@ static void applyPenInverseConfigFromRequest() {
   if (server.hasArg("wheelBase")) cfg.wheelBaseCm = server.arg("wheelBase").toFloat();
   if (server.hasArg("penOffset")) cfg.penOffsetCm = server.arg("penOffset").toFloat();
 
+  if (server.hasArg("distanceScale")) cfg.distanceScale = server.arg("distanceScale").toFloat();
+
   if (server.hasArg("penSpeed")) cfg.penSpeedCms = server.arg("penSpeed").toFloat();
   if (server.hasArg("lineGain")) cfg.lineGain = server.arg("lineGain").toFloat();
   if (server.hasArg("targetGain")) cfg.targetGain = server.arg("targetGain").toFloat();
@@ -109,6 +114,12 @@ static void applyPenInverseConfigFromRequest() {
   if (server.hasArg("coefL")) cfg.coefLeftCmsPerPwm = server.arg("coefL").toFloat();
   if (server.hasArg("coefR")) cfg.coefRightCmsPerPwm = server.arg("coefR").toFloat();
 
+  if (server.hasArg("minPwm")) cfg.minPwm = server.arg("minPwm").toInt();
+  if (server.hasArg("pwmSlewStep")) cfg.pwmSlewStep = server.arg("pwmSlewStep").toInt();
+  if (server.hasArg("pwmDither")) cfg.pwmDither = (server.arg("pwmDither").toInt() != 0);
+  if (server.hasArg("allowReverse")) cfg.allowReverse = (server.arg("allowReverse").toInt() != 0);
+  if (server.hasArg("minForwardSpeed")) cfg.minForwardSpeedCms = server.arg("minForwardSpeed").toFloat();
+
   if (server.hasArg("segTol")) cfg.segmentToleranceCm = server.arg("segTol").toFloat();
 
   PenInverseFollower::setConfig(cfg);
@@ -122,6 +133,7 @@ static String penInverseConfigJson() {
   json += "\"wheelBase\":" + String(cfg.wheelBaseCm, 3) + ",";
   json += "\"penOffset\":" + String(cfg.penOffsetCm, 3) + ",";
 
+  json += "\"distanceScale\":" + String(cfg.distanceScale, 3) + ",";
   json += "\"penSpeed\":" + String(cfg.penSpeedCms, 3) + ",";
   json += "\"lineGain\":" + String(cfg.lineGain, 3) + ",";
   json += "\"targetGain\":" + String(cfg.targetGain, 3) + ",";
@@ -137,6 +149,12 @@ static String penInverseConfigJson() {
 
   json += "\"coefL\":" + String(cfg.coefLeftCmsPerPwm, 5) + ",";
   json += "\"coefR\":" + String(cfg.coefRightCmsPerPwm, 5) + ",";
+
+  json += "\"minPwm\":" + String(cfg.minPwm) + ",";
+  json += "\"pwmSlewStep\":" + String(cfg.pwmSlewStep) + ",";
+  json += "\"pwmDither\":" + String(cfg.pwmDither ? "true" : "false") + ",";
+  json += "\"allowReverse\":" + String(cfg.allowReverse ? "true" : "false") + ",";
+  json += "\"minForwardSpeed\":" + String(cfg.minForwardSpeedCms, 3) + ",";
 
   json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3);
 
@@ -403,17 +421,81 @@ static void handleS2Test() {
   server.send(200, "text/plain", "S2_TEST");
 }
 
+static bool parseBoolArg(const char* name, bool defaultValue) {
+  if (!server.hasArg(name)) return defaultValue;
+
+  String value = server.arg(name);
+  value.toLowerCase();
+
+  return value == "1" || value == "true" || value == "yes" || value == "oui";
+}
+
+static void handleS2CercleStartSmall() {
+  applyPenInverseConfigFromRequest();
+
+  PenInverseFollower::Config cfg = PenInverseFollower::getConfig();
+
+  CircleTrajectoryHelper::CircleRequest req;
+  req.radiusCm = server.hasArg("radius") ? server.arg("radius").toFloat() : 5.0f;
+  req.segments = server.hasArg("segments") ? server.arg("segments").toInt() : 96;
+  req.clockwise = parseBoolArg("clockwise", true);
+
+  String startMode = server.hasArg("startMode") ? server.arg("startMode") : "bottom";
+  startMode.toLowerCase();
+
+  if (startMode == "right") {
+    req.startMode = CircleTrajectoryHelper::StartMode::Right;
+  } else {
+    req.startMode = CircleTrajectoryHelper::StartMode::Bottom;
+  }
+
+  TrajectoryGenerator::Trajectory trajectory;
+
+  if (!CircleTrajectoryHelper::buildSmallCircle(trajectory, req)) {
+    Logger::log("Erreur : impossible de generer le petit cercle");
+    server.send(400, "text/plain", "CIRCLE_GENERATION_ERROR");
+    return;
+  }
+
+  float theta0 = 0.0f;
+  String initialMode = server.hasArg("initialHeadingMode") ? server.arg("initialHeadingMode") : "tangent";
+  initialMode.toLowerCase();
+
+  if (initialMode == "tangent") {
+    theta0 = CircleTrajectoryHelper::initialHeadingRad(trajectory);
+  } else {
+    theta0 = 0.0f;
+  }
+
+  float startPenX = trajectory.segments[0].a.x;
+  float startPenY = trajectory.segments[0].a.y;
+
+  float baseX = startPenX - cfg.penOffsetCm * cos(theta0);
+  float baseY = startPenY - cfg.penOffsetCm * sin(theta0);
+
+  Odometry::resetPose(baseX, baseY, theta0);
+
+  if (!PenInverseFollower::startTrajectory(trajectory)) {
+    server.send(500, "text/plain", "FOLLOWER_START_ERROR");
+    return;
+  }
+
+  Logger::log("Petit cercle lance : r=" + String(req.radiusCm, 2) +
+              " cm segments=" + String(req.segments) +
+              " sens=" + String(req.clockwise ? "horaire" : "antihoraire") +
+              " theta0=" + String(Odometry::normalizeAngleDeg(Odometry::radToDeg(theta0)), 1));
+
+  server.send(200, "text/plain", "S2_SMALL_CIRCLE_START");
+}
+
 static void handleS2CercleStart() {
-  float radius = server.hasArg("r") ? server.arg("r").toFloat() : 10.0f;
-  int segments = server.hasArg("n") ? server.arg("n").toInt() : 36;
-  int pwm = server.hasArg("pwm") ? server.arg("pwm").toInt() : 170;
+  // Compatibilité avec l'ancienne route.
+  handleS2CercleStartSmall();
+}
 
-  Logger::log("Demande sequence CERCLE");
-  Logger::log("rayon=" + String(radius, 1) +
-              " segments=" + String(segments) +
-              " pwm=" + String(pwm));
-
-  server.send(200, "text/plain", "S2_CERCLE_START");
+static void handleS2CercleStop() {
+  PenInverseFollower::stop();
+  server.send(200, "text/plain", "S2_CERCLE_STOP");
 }
 
 static void handleS2RoseStart() {
@@ -479,6 +561,8 @@ namespace WebApp {
 
     // API futures séquences
     server.on("/api/s2/cercle/start", handleS2CercleStart);
+    server.on("/api/s2/cercle/start-small", handleS2CercleStartSmall);
+    server.on("/api/s2/cercle/stop", handleS2CercleStop);
     server.on("/api/s2/rose/start", handleS2RoseStart);
 
     server.begin();

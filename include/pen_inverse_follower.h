@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include "trajectory_generator.h"
 
 namespace PenInverseFollower {
   struct Point {
@@ -16,25 +17,61 @@ namespace PenInverseFollower {
     float wheelBaseCm = 8.3f;
     float penOffsetCm = 13.0f;
 
-    float penSpeedCms = 4.0f;
-    float lineGain = 1.5f;
+    // Correction globale des distances demandées.
+    // Exemple : demandé 20 cm, réel 16 cm => distanceScale = 20 / 16 = 1.25.
+    float distanceScale = 1.0f;
+
+    // Suivi de trajectoire du stylo.
+    float penSpeedCms = 0.7f;
+    float lineGain = 0.45f;
     float targetGain = 0.8f;
-    float lookaheadCm = 2.0f;
+    float lookaheadCm = 0.35f;
 
-    float penSpeedMaxCms = 8.0f;
-    float wheelSpeedMaxCms = 10.0f;
+    // Saturations physiques.
+    float penSpeedMaxCms = 1.8f;
+    float wheelSpeedMaxCms = 4.0f;
 
-    float kp = 0.20f;
+    // Compatibilité avec la page escalier : limitation de rotation et de correction.
+    float maxOmegaRadS = 4.0f;
+    float maxNormalCorrectionCms = 2.5f;
+
+    // Petit cercle : le recul doit généralement être autorisé.
+    bool allowReverse = true;
+    float minForwardSpeedCms = 0.0f;
+
+    // PID sur l'erreur latérale du stylo.
+    float kp = 0.02f;
     float ki = 0.00f;
-    float kd = 0.05f;
-    float integralLimit = 10.0f;
+    float kd = 0.015f;
+    float integralLimit = 5.0f;
 
-    float coefLeftCmsPerPwm = 0.080f;
-    float coefRightCmsPerPwm = 0.080f;
+    // Conversion vitesse roue -> PWM.
+    float coefLeftCmsPerPwm = 0.0709f;
+    float coefRightCmsPerPwm = 0.0686f;
 
-    int minPwm = 160;
+    int minPwm = 180;
 
-    float segmentToleranceCm = 0.20f;
+    // En dessous de cette vitesse roue théorique, on considère que la roue ne doit pas bouger.
+    float minCommandSpeedCms = 0.0f;
+
+    // Rampe PWM : variation maximale de PWM à chaque update.
+    int pwmSlewStep = 6;
+
+    // Petit cercle : autorise des micro-déplacements avec un PWM minimum élevé.
+    // Au lieu de transformer toute petite demande en PWM=180 permanent,
+    // le code envoie des impulsions courtes à minPwm pour obtenir une vitesse moyenne plus faible.
+    bool pwmDither = true;
+
+    float segmentToleranceCm = 0.08f;
+
+    // Champs conservés pour compatibilité avec l'API/page escalier.
+    // Le mode cercle réel utilise surtout startTrajectory(...).
+    bool cornerMode = false;
+    float cornerApproachCm = 2.5f;
+    float cornerSpeedCms = 0.35f;
+    float cornerOmegaRadS = 4.0f;
+    float cornerExitAngleDeg = 12.0f;
+    float cornerMaxDurationS = 1.80f;
   };
 
   struct Status {
@@ -43,6 +80,11 @@ namespace PenInverseFollower {
 
     int currentSegment = 0;
     int segmentCount = 0;
+
+    String phaseName = "IDLE";
+    bool cornerActive = false;
+    float remainingToCornerCm = 0.0f;
+    float cornerAngleErrorDeg = 0.0f;
 
     float penX = 0.0f;
     float penY = 0.0f;
@@ -67,6 +109,13 @@ namespace PenInverseFollower {
 
     int pwmLeft = 0;
     int pwmRight = 0;
+
+    int targetPwmLeft = 0;
+    int targetPwmRight = 0;
+
+    bool reverseLimited = false;
+    bool omegaLimited = false;
+    bool normalCorrectionLimited = false;
   };
 
   void begin();
@@ -75,9 +124,16 @@ namespace PenInverseFollower {
   Config getConfig();
   Status getStatus();
 
+  bool loadConfig();
+  bool saveConfig();
+  void resetConfigToDefaults();
+
   void startLine(float distanceCm);
   void startOneAngle(float d1Cm, float angleDeg, float d2Cm);
   void startStair(float d1Cm, float angleLeftDeg, float d2Cm, float angleRightDeg, float d3Cm);
+
+  // Nouveau : permet de suivre un cercle, une rosace ou n'importe quelle liste de segments.
+  bool startTrajectory(const TrajectoryGenerator::Trajectory& trajectory);
 
   void stop();
   void update(unsigned long now, float dt);

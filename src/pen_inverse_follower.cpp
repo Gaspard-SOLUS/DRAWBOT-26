@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <math.h>
+#include <Preferences.h>
 
 #include "pen_inverse_follower.h"
 #include "app_state.h"
@@ -18,11 +19,13 @@ namespace {
     bool first = true;
   };
 
+  static Preferences prefs;
+
   PenInverseFollower::Config cfg;
   PenInverseFollower::Status status;
 
-  static const int MAX_SEGMENTS = 5;
-  PenInverseFollower::Segment segments[MAX_SEGMENTS];
+  static const int MAX_SEGMENTS_LOCAL = TrajectoryGenerator::MAX_SEGMENTS;
+  PenInverseFollower::Segment segments[MAX_SEGMENTS_LOCAL];
 
   int segmentCount = 0;
   int segmentIndex = 0;
@@ -31,6 +34,12 @@ namespace {
   bool finished = false;
 
   PID pidLine;
+
+  int lastPwmLeft = 0;
+  int lastPwmRight = 0;
+
+  float ditherAccumulatorLeft = 0.0f;
+  float ditherAccumulatorRight = 0.0f;
 
   float clampFloat(float value, float minValue, float maxValue) {
     if (value < minValue) return minValue;
@@ -96,18 +105,73 @@ namespace {
     return sign * absPwm;
   }
 
-  int leftSpeedToPwm(float speedCms) {
-    if (fabs(cfg.coefLeftCmsPerPwm) < 0.001f) return 0;
+  int applySlew(int previous, int target) {
+    int step = cfg.pwmSlewStep;
+    if (step < 1) step = 1;
 
-    int pwm = (int)round(speedCms / cfg.coefLeftCmsPerPwm);
-    return applyMinPwm(pwm);
+    if (target > previous + step) return previous + step;
+    if (target < previous - step) return previous - step;
+    return target;
   }
 
-  int rightSpeedToPwm(float speedCms) {
-    if (fabs(cfg.coefRightCmsPerPwm) < 0.001f) return 0;
+  int leftSpeedToRawPwm(float speedCms) {
+    if (fabs(cfg.coefLeftCmsPerPwm) < 0.001f) return 0;
+    return (int)round(speedCms / cfg.coefLeftCmsPerPwm);
+  }
 
-    int pwm = (int)round(speedCms / cfg.coefRightCmsPerPwm);
-    return applyMinPwm(pwm);
+  int rightSpeedToRawPwm(float speedCms) {
+    if (fabs(cfg.coefRightCmsPerPwm) < 0.001f) return 0;
+    return (int)round(speedCms / cfg.coefRightCmsPerPwm);
+  }
+
+  int ditherPwmCommand(int rawPwm, float& accumulator) {
+    if (rawPwm == 0) {
+      accumulator = 0.0f;
+      return 0;
+    }
+
+    int sign = (rawPwm > 0) ? 1 : -1;
+    int absRaw = abs(rawPwm);
+
+    if (!cfg.pwmDither) {
+      return applyMinPwm(rawPwm);
+    }
+
+    if (absRaw >= cfg.minPwm) {
+      accumulator = 0.0f;
+      return constrain(rawPwm, -255, 255);
+    }
+
+    if (cfg.minPwm <= 0) {
+      return constrain(rawPwm, -255, 255);
+    }
+
+    // Pulse-density modulation:
+    // exemple raw=45 et minPwm=180 => duty=0.25.
+    // On envoie une impulsion à 180 environ un cycle sur quatre.
+    float duty = ((float)absRaw) / ((float)cfg.minPwm);
+    duty = clampFloat(duty, 0.0f, 1.0f);
+
+    accumulator += duty;
+
+    if (accumulator >= 1.0f) {
+      accumulator -= 1.0f;
+      return sign * cfg.minPwm;
+    }
+
+    return 0;
+  }
+
+  bool isSmallDitherCommand(int rawPwm) {
+    return cfg.pwmDither && cfg.minPwm > 0 && abs(rawPwm) > 0 && abs(rawPwm) < cfg.minPwm;
+  }
+
+  float pwmToLeftSpeed(int pwm) {
+    return ((float)pwm) * cfg.coefLeftCmsPerPwm;
+  }
+
+  float pwmToRightSpeed(int pwm) {
+    return ((float)pwm) * cfg.coefRightCmsPerPwm;
   }
 
   void setMotorPwmTracked(int pwmLeft, int pwmRight) {
@@ -121,6 +185,31 @@ namespace {
     setMotors(pwmLeft, pwmRight);
   }
 
+  void hardStopMotorsTracked() {
+    lastPwmLeft = 0;
+    lastPwmRight = 0;
+    ditherAccumulatorLeft = 0.0f;
+    ditherAccumulatorRight = 0.0f;
+    status.pwmLeft = 0;
+    status.pwmRight = 0;
+    status.targetPwmLeft = 0;
+    status.targetPwmRight = 0;
+    status.phaseName = "IDLE";
+    status.cornerActive = false;
+    status.reverseLimited = false;
+    status.omegaLimited = false;
+    status.normalCorrectionLimited = false;
+    status.vLeftCms = 0.0f;
+    status.vRightCms = 0.0f;
+    status.vCenterCms = 0.0f;
+    status.omegaRadS = 0.0f;
+
+    setMotorPwmTracked(0, 0);
+    stopMotors();
+
+    motorState.mode = "IDLE";
+  }
+
   void resetStatus() {
     status = PenInverseFollower::Status();
 
@@ -128,19 +217,32 @@ namespace {
     status.finished = finished;
     status.currentSegment = segmentIndex;
     status.segmentCount = segmentCount;
+    status.phaseName = running ? "FOLLOW_SEGMENT" : (finished ? "FINISHED" : "IDLE");
   }
 
   void startSegments(int count) {
-    segmentCount = count;
+    segmentCount = constrain(count, 0, MAX_SEGMENTS_LOCAL);
     segmentIndex = 0;
 
-    running = true;
-    finished = false;
+    running = (segmentCount > 0);
+    finished = (segmentCount <= 0);
+
+    lastPwmLeft = 0;
+    lastPwmRight = 0;
+    ditherAccumulatorLeft = 0.0f;
+    ditherAccumulatorRight = 0.0f;
 
     applyPidConfig();
     resetStatus();
 
     Logger::log("PenInverseFollower demarre avec " + String(segmentCount) + " segment(s)");
+  }
+
+  void copySegment(int index, float ax, float ay, float bx, float by) {
+    segments[index].a.x = ax;
+    segments[index].a.y = ay;
+    segments[index].b.x = bx;
+    segments[index].b.y = by;
   }
 }
 
@@ -152,6 +254,8 @@ namespace PenInverseFollower {
     segmentCount = 0;
     segmentIndex = 0;
 
+    loadConfig();
+
     applyPidConfig();
     resetStatus();
 
@@ -160,6 +264,23 @@ namespace PenInverseFollower {
 
   void setConfig(const Config& newCfg) {
     cfg = newCfg;
+
+    if (cfg.wheelBaseCm < 1.0f) cfg.wheelBaseCm = 8.3f;
+    if (cfg.penOffsetCm < 0.1f) cfg.penOffsetCm = 13.0f;
+    if (cfg.distanceScale <= 0.0f) cfg.distanceScale = 1.0f;
+    if (cfg.penSpeedCms < 0.0f) cfg.penSpeedCms = 0.0f;
+    if (cfg.penSpeedMaxCms < 0.1f) cfg.penSpeedMaxCms = 0.1f;
+    if (cfg.wheelSpeedMaxCms < 0.1f) cfg.wheelSpeedMaxCms = 0.1f;
+    if (cfg.maxOmegaRadS < 0.1f) cfg.maxOmegaRadS = 0.1f;
+    if (cfg.maxNormalCorrectionCms < 0.0f) cfg.maxNormalCorrectionCms = 0.0f;
+    if (cfg.minCommandSpeedCms < 0.0f) cfg.minCommandSpeedCms = 0.0f;
+    if (cfg.cornerMaxDurationS < 0.1f) cfg.cornerMaxDurationS = 0.1f;
+    if (cfg.minPwm < 0) cfg.minPwm = 0;
+    if (cfg.minPwm > 255) cfg.minPwm = 255;
+    if (cfg.pwmSlewStep < 1) cfg.pwmSlewStep = 1;
+    if (cfg.pwmSlewStep > 255) cfg.pwmSlewStep = 255;
+    if (cfg.segmentToleranceCm < 0.01f) cfg.segmentToleranceCm = 0.01f;
+
     applyPidConfig();
 
     Logger::log("Config PenInverseFollower mise a jour");
@@ -173,32 +294,153 @@ namespace PenInverseFollower {
     return status;
   }
 
+  bool loadConfig() {
+    prefs.begin("penFollower", true);
+
+    bool hasConfig = prefs.getBool("hasConfig", false);
+
+    if (hasConfig) {
+      cfg.wheelBaseCm = prefs.getFloat("wheelBase", cfg.wheelBaseCm);
+      cfg.penOffsetCm = prefs.getFloat("penOffset", cfg.penOffsetCm);
+      cfg.distanceScale = prefs.getFloat("distScale", cfg.distanceScale);
+
+      cfg.penSpeedCms = prefs.getFloat("penSpeed", cfg.penSpeedCms);
+      cfg.lineGain = prefs.getFloat("lineGain", cfg.lineGain);
+      cfg.targetGain = prefs.getFloat("targetGain", cfg.targetGain);
+      cfg.lookaheadCm = prefs.getFloat("lookahead", cfg.lookaheadCm);
+
+      cfg.penSpeedMaxCms = prefs.getFloat("penSpMax", cfg.penSpeedMaxCms);
+      cfg.wheelSpeedMaxCms = prefs.getFloat("wheelSpMax", cfg.wheelSpeedMaxCms);
+      cfg.maxOmegaRadS = prefs.getFloat("maxOmega", cfg.maxOmegaRadS);
+      cfg.maxNormalCorrectionCms = prefs.getFloat("maxNorm", cfg.maxNormalCorrectionCms);
+
+      cfg.allowReverse = prefs.getBool("allowRev", cfg.allowReverse);
+      cfg.minForwardSpeedCms = prefs.getFloat("minFwd", cfg.minForwardSpeedCms);
+      cfg.minCommandSpeedCms = prefs.getFloat("minCmd", cfg.minCommandSpeedCms);
+
+      cfg.cornerMode = prefs.getBool("cornerMode", cfg.cornerMode);
+      cfg.cornerApproachCm = prefs.getFloat("cornerAp", cfg.cornerApproachCm);
+      cfg.cornerSpeedCms = prefs.getFloat("cornerSp", cfg.cornerSpeedCms);
+      cfg.cornerOmegaRadS = prefs.getFloat("cornerOm", cfg.cornerOmegaRadS);
+      cfg.cornerExitAngleDeg = prefs.getFloat("cornerEx", cfg.cornerExitAngleDeg);
+      cfg.cornerMaxDurationS = prefs.getFloat("cornerDur", cfg.cornerMaxDurationS);
+
+      cfg.kp = prefs.getFloat("kp", cfg.kp);
+      cfg.ki = prefs.getFloat("ki", cfg.ki);
+      cfg.kd = prefs.getFloat("kd", cfg.kd);
+      cfg.integralLimit = prefs.getFloat("iLimit", cfg.integralLimit);
+
+      cfg.coefLeftCmsPerPwm = prefs.getFloat("coefL", cfg.coefLeftCmsPerPwm);
+      cfg.coefRightCmsPerPwm = prefs.getFloat("coefR", cfg.coefRightCmsPerPwm);
+
+      cfg.minPwm = prefs.getInt("minPwm", cfg.minPwm);
+      cfg.pwmSlewStep = prefs.getInt("slew", cfg.pwmSlewStep);
+      cfg.pwmDither = prefs.getBool("dither", cfg.pwmDither);
+
+      cfg.allowReverse = prefs.getBool("reverse", cfg.allowReverse);
+      cfg.minForwardSpeedCms = prefs.getFloat("minFwd", cfg.minForwardSpeedCms);
+
+      cfg.segmentToleranceCm = prefs.getFloat("segTol", cfg.segmentToleranceCm);
+    }
+
+    prefs.end();
+
+    applyPidConfig();
+
+    Logger::log(hasConfig ? "Config PenInverseFollower chargee depuis flash"
+                          : "Config PenInverseFollower par defaut");
+
+    return hasConfig;
+  }
+
+  bool saveConfig() {
+    prefs.begin("penFollower", false);
+
+    prefs.putBool("hasConfig", true);
+
+    prefs.putFloat("wheelBase", cfg.wheelBaseCm);
+    prefs.putFloat("penOffset", cfg.penOffsetCm);
+    prefs.putFloat("distScale", cfg.distanceScale);
+
+    prefs.putFloat("penSpeed", cfg.penSpeedCms);
+    prefs.putFloat("lineGain", cfg.lineGain);
+    prefs.putFloat("targetGain", cfg.targetGain);
+    prefs.putFloat("lookahead", cfg.lookaheadCm);
+
+    prefs.putFloat("penSpMax", cfg.penSpeedMaxCms);
+    prefs.putFloat("wheelSpMax", cfg.wheelSpeedMaxCms);
+    prefs.putFloat("maxOmega", cfg.maxOmegaRadS);
+    prefs.putFloat("maxNorm", cfg.maxNormalCorrectionCms);
+
+    prefs.putBool("allowRev", cfg.allowReverse);
+    prefs.putFloat("minFwd", cfg.minForwardSpeedCms);
+    prefs.putFloat("minCmd", cfg.minCommandSpeedCms);
+
+    prefs.putBool("cornerMode", cfg.cornerMode);
+    prefs.putFloat("cornerAp", cfg.cornerApproachCm);
+    prefs.putFloat("cornerSp", cfg.cornerSpeedCms);
+    prefs.putFloat("cornerOm", cfg.cornerOmegaRadS);
+    prefs.putFloat("cornerEx", cfg.cornerExitAngleDeg);
+    prefs.putFloat("cornerDur", cfg.cornerMaxDurationS);
+
+    prefs.putFloat("kp", cfg.kp);
+    prefs.putFloat("ki", cfg.ki);
+    prefs.putFloat("kd", cfg.kd);
+    prefs.putFloat("iLimit", cfg.integralLimit);
+
+    prefs.putFloat("coefL", cfg.coefLeftCmsPerPwm);
+    prefs.putFloat("coefR", cfg.coefRightCmsPerPwm);
+
+    prefs.putInt("minPwm", cfg.minPwm);
+    prefs.putInt("slew", cfg.pwmSlewStep);
+    prefs.putBool("dither", cfg.pwmDither);
+
+    prefs.putBool("reverse", cfg.allowReverse);
+    prefs.putFloat("minFwd", cfg.minForwardSpeedCms);
+
+    prefs.putFloat("segTol", cfg.segmentToleranceCm);
+
+    prefs.end();
+
+    Logger::log("Config PenInverseFollower enregistree en flash");
+    return true;
+  }
+
+  void resetConfigToDefaults() {
+    cfg = Config();
+    applyPidConfig();
+    Logger::log("Config PenInverseFollower remise aux valeurs par defaut");
+  }
+
   void startLine(float distanceCm) {
-    segments[0] = {
-      {0.0f, 0.0f},
-      {distanceCm, 0.0f}
-    };
+    float d = distanceCm * cfg.distanceScale;
+
+    copySegment(0, 0.0f, 0.0f, d, 0.0f);
 
     startSegments(1);
 
-    Logger::log("Test ligne stylo : distance=" + String(distanceCm, 1) + " cm");
+    Logger::log("Test ligne stylo : distance=" + String(distanceCm, 1) +
+                " cm scale=" + String(cfg.distanceScale, 3));
   }
 
   void startOneAngle(float d1Cm, float angleDeg, float d2Cm) {
+    float d1 = d1Cm * cfg.distanceScale;
+    float d2 = d2Cm * cfg.distanceScale;
+
     Point p0 {0.0f, 0.0f};
 
     float theta = 0.0f;
 
     Point p1 {
-      p0.x + d1Cm * cos(theta),
-      p0.y + d1Cm * sin(theta)
+      p0.x + d1 * cos(theta),
+      p0.y + d1 * sin(theta)
     };
 
     theta += degToRad(angleDeg);
 
     Point p2 {
-      p1.x + d2Cm * cos(theta),
-      p1.y + d2Cm * sin(theta)
+      p1.x + d2 * cos(theta),
+      p1.y + d2 * sin(theta)
     };
 
     segments[0] = {p0, p1};
@@ -206,33 +448,37 @@ namespace PenInverseFollower {
 
     startSegments(2);
 
-    Logger::log("Test un angle stylo : d1=" + String(d1Cm, 1) +
+    Logger::log("Angle stylo lance : d1=" + String(d1Cm, 1) +
                 " angle=" + String(angleDeg, 1) +
                 " d2=" + String(d2Cm, 1));
   }
 
   void startStair(float d1Cm, float angleLeftDeg, float d2Cm, float angleRightDeg, float d3Cm) {
+    float d1 = d1Cm * cfg.distanceScale;
+    float d2 = d2Cm * cfg.distanceScale;
+    float d3 = d3Cm * cfg.distanceScale;
+
     Point p0 {0.0f, 0.0f};
 
     float theta = 0.0f;
 
     Point p1 {
-      p0.x + d1Cm * cos(theta),
-      p0.y + d1Cm * sin(theta)
+      p0.x + d1 * cos(theta),
+      p0.y + d1 * sin(theta)
     };
 
     theta += degToRad(angleLeftDeg);
 
     Point p2 {
-      p1.x + d2Cm * cos(theta),
-      p1.y + d2Cm * sin(theta)
+      p1.x + d2 * cos(theta),
+      p1.y + d2 * sin(theta)
     };
 
     theta -= degToRad(angleRightDeg);
 
     Point p3 {
-      p2.x + d3Cm * cos(theta),
-      p2.y + d3Cm * sin(theta)
+      p2.x + d3 * cos(theta),
+      p2.y + d3 * sin(theta)
     };
 
     segments[0] = {p0, p1};
@@ -241,21 +487,38 @@ namespace PenInverseFollower {
 
     startSegments(3);
 
-    Logger::log("Escalier stylo lance : d1=" + String(d1Cm, 1) +
-                " aL=" + String(angleLeftDeg, 1) +
-                " d2=" + String(d2Cm, 1) +
-                " aR=" + String(angleRightDeg, 1) +
-                " d3=" + String(d3Cm, 1));
+    Logger::log("Escalier stylo lance");
+  }
+
+  bool startTrajectory(const TrajectoryGenerator::Trajectory& trajectory) {
+    if (trajectory.count <= 0) {
+      Logger::log("Erreur : trajectoire vide");
+      return false;
+    }
+
+    int count = trajectory.count;
+    if (count > MAX_SEGMENTS_LOCAL) {
+      count = MAX_SEGMENTS_LOCAL;
+    }
+
+    for (int i = 0; i < count; i++) {
+      segments[i].a.x = trajectory.segments[i].a.x;
+      segments[i].a.y = trajectory.segments[i].a.y;
+      segments[i].b.x = trajectory.segments[i].b.x;
+      segments[i].b.y = trajectory.segments[i].b.y;
+    }
+
+    startSegments(count);
+
+    Logger::log("Trajectoire stylo lancee : " + String(count) + " segment(s)");
+    return true;
   }
 
   void stop() {
     running = false;
     finished = false;
 
-    setMotorPwmTracked(0, 0);
-    stopMotors();
-
-    motorState.mode = "IDLE";
+    hardStopMotorsTracked();
 
     resetStatus();
 
@@ -269,12 +532,15 @@ namespace PenInverseFollower {
       return;
     }
 
+    if (dt <= 0.0f) {
+      dt = 0.02f;
+    }
+
     if (segmentIndex >= segmentCount) {
       running = false;
       finished = true;
 
-      setMotorPwmTracked(0, 0);
-      stopMotors();
+      hardStopMotorsTracked();
 
       status.running = running;
       status.finished = finished;
@@ -323,14 +589,15 @@ namespace PenInverseFollower {
       segmentIndex++;
       resetPid(pidLine);
 
-      Logger::log("Passage segment stylo " + String(segmentIndex + 1));
-
       if (segmentIndex >= segmentCount) {
         running = false;
         finished = true;
-        setMotorPwmTracked(0, 0);
-        stopMotors();
-        motorState.mode = "IDLE";
+        hardStopMotorsTracked();
+
+        Logger::log("PenInverseFollower termine. Erreur max stylo=" +
+                    String(status.maxLateralErrorCm, 2) + " cm");
+      } else {
+        Logger::log("Passage segment stylo " + String(segmentIndex + 1));
       }
 
       status.running = running;
@@ -355,14 +622,21 @@ namespace PenInverseFollower {
     float errorY = targetY - penY;
 
     float pidNormal = updatePid(pidLine, lateralError, dt, cfg.integralLimit);
+    float normalCorrection = cfg.lineGain * lateralError + pidNormal;
+
+    status.normalCorrectionLimited = false;
+    if (cfg.maxNormalCorrectionCms > 0.0f && fabs(normalCorrection) > cfg.maxNormalCorrectionCms) {
+      normalCorrection = (normalCorrection > 0.0f) ? cfg.maxNormalCorrectionCms : -cfg.maxNormalCorrectionCms;
+      status.normalCorrectionLimited = true;
+    }
 
     float vPenX = cfg.penSpeedCms * ux
                 + cfg.targetGain * errorX
-                - (cfg.lineGain * lateralError + pidNormal) * nx;
+                - normalCorrection * nx;
 
     float vPenY = cfg.penSpeedCms * uy
                 + cfg.targetGain * errorY
-                - (cfg.lineGain * lateralError + pidNormal) * ny;
+                - normalCorrection * ny;
 
     float vPenNorm = sqrt(vPenX * vPenX + vPenY * vPenY);
 
@@ -380,21 +654,62 @@ namespace PenInverseFollower {
     float vCenter = vPenX * ex + vPenY * ey;
     float omega = (vPenX * normalRobotX + vPenY * normalRobotY) / cfg.penOffsetCm;
 
-    float vLeft = vCenter - omega * cfg.wheelBaseCm * 0.5f;
-    float vRight = vCenter + omega * cfg.wheelBaseCm * 0.5f;
+    status.reverseLimited = false;
+    status.omegaLimited = false;
 
-    vLeft = clampFloat(vLeft, -cfg.wheelSpeedMaxCms, cfg.wheelSpeedMaxCms);
-    vRight = clampFloat(vRight, -cfg.wheelSpeedMaxCms, cfg.wheelSpeedMaxCms);
+    if (!cfg.allowReverse && vCenter < cfg.minForwardSpeedCms) {
+      vCenter = cfg.minForwardSpeedCms;
+      status.reverseLimited = true;
+    }
 
-    int pwmLeft = leftSpeedToPwm(vLeft);
-    int pwmRight = rightSpeedToPwm(vRight);
+    if (cfg.maxOmegaRadS > 0.0f && fabs(omega) > cfg.maxOmegaRadS) {
+      omega = (omega > 0.0f) ? cfg.maxOmegaRadS : -cfg.maxOmegaRadS;
+      status.omegaLimited = true;
+    }
+
+    float vLeftDesired = vCenter - omega * cfg.wheelBaseCm * 0.5f;
+    float vRightDesired = vCenter + omega * cfg.wheelBaseCm * 0.5f;
+
+    vLeftDesired = clampFloat(vLeftDesired, -cfg.wheelSpeedMaxCms, cfg.wheelSpeedMaxCms);
+    vRightDesired = clampFloat(vRightDesired, -cfg.wheelSpeedMaxCms, cfg.wheelSpeedMaxCms);
+
+    if (fabs(vLeftDesired) < cfg.minCommandSpeedCms) vLeftDesired = 0.0f;
+    if (fabs(vRightDesired) < cfg.minCommandSpeedCms) vRightDesired = 0.0f;
+
+    int pwmLeftRaw = leftSpeedToRawPwm(vLeftDesired);
+    int pwmRightRaw = rightSpeedToRawPwm(vRightDesired);
+
+    int pwmLeftTarget = ditherPwmCommand(pwmLeftRaw, ditherAccumulatorLeft);
+    int pwmRightTarget = ditherPwmCommand(pwmRightRaw, ditherAccumulatorRight);
+
+    int pwmLeft = pwmLeftTarget;
+    int pwmRight = pwmRightTarget;
+
+    // Si on est en micro-impulsions, on ne rampe pas vers minPwm :
+    // il faut vraiment envoyer une impulsion suffisante pour vaincre les frottements.
+    // Pour les commandes au-dessus de minPwm, on garde la rampe classique.
+    if (!isSmallDitherCommand(pwmLeftRaw)) {
+      pwmLeft = applySlew(lastPwmLeft, pwmLeftTarget);
+    }
+
+    if (!isSmallDitherCommand(pwmRightRaw)) {
+      pwmRight = applySlew(lastPwmRight, pwmRightTarget);
+    }
+
+    lastPwmLeft = pwmLeft;
+    lastPwmRight = pwmRight;
 
     setMotorPwmTracked(pwmLeft, pwmRight);
+
+    float vLeftActual = pwmToLeftSpeed(pwmLeft);
+    float vRightActual = pwmToRightSpeed(pwmRight);
 
     status.running = running;
     status.finished = finished;
     status.currentSegment = segmentIndex;
     status.segmentCount = segmentCount;
+    status.phaseName = "FOLLOW_SEGMENT";
+    status.cornerActive = false;
 
     status.penX = penX;
     status.penY = penY;
@@ -409,14 +724,16 @@ namespace PenInverseFollower {
     status.vPenX = vPenX;
     status.vPenY = vPenY;
 
-    status.vCenterCms = vCenter;
-    status.omegaRadS = omega;
+    status.vCenterCms = (vLeftActual + vRightActual) * 0.5f;
+    status.omegaRadS = (vRightActual - vLeftActual) / cfg.wheelBaseCm;
 
-    status.vLeftCms = vLeft;
-    status.vRightCms = vRight;
+    status.vLeftCms = vLeftActual;
+    status.vRightCms = vRightActual;
 
     status.pwmLeft = pwmLeft;
     status.pwmRight = pwmRight;
+    status.targetPwmLeft = pwmLeftTarget;
+    status.targetPwmRight = pwmRightTarget;
   }
 
   bool isRunning() {
