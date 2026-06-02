@@ -5,9 +5,10 @@
 #include "encodeurs.h"
 #include "app_state.h"
 #include "logger.h"
+#include "robot.h"
 
-static const float WHEEL_BASE_CM = 8.3f;
-static const float PEN_OFFSET_CM = 13.0f;
+static float wheelBaseCm = RobotParams::WHEEL_BASE_CM;
+static float penOffsetCm = RobotParams::PEN_OFFSET_CM;
 
 static float lastDistL = 0.0f;
 static float lastDistR = 0.0f;
@@ -51,7 +52,7 @@ namespace Odometry {
     odometryState.speedRightCms = dR / dt;
 
     float dCenter = (dL + dR) * 0.5f;
-    float dTheta = (dR - dL) / WHEEL_BASE_CM;
+    float dTheta = (dR - dL) / wheelBaseCm;
 
     float thetaMid = odometryState.thetaRad + dTheta * 0.5f;
 
@@ -59,8 +60,8 @@ namespace Odometry {
     odometryState.yCm += dCenter * sin(thetaMid);
     odometryState.thetaRad += dTheta;
 
-    odometryState.penXCm = odometryState.xCm + PEN_OFFSET_CM * cos(odometryState.thetaRad);
-    odometryState.penYCm = odometryState.yCm + PEN_OFFSET_CM * sin(odometryState.thetaRad);
+    odometryState.penXCm = odometryState.xCm + penOffsetCm * cos(odometryState.thetaRad);
+    odometryState.penYCm = odometryState.yCm + penOffsetCm * sin(odometryState.thetaRad);
 
     lastDistL = currentDistL;
     lastDistR = currentDistR;
@@ -81,8 +82,8 @@ namespace Odometry {
     odometryState.yCm = yCm;
     odometryState.thetaRad = thetaRad;
 
-    odometryState.penXCm = odometryState.xCm + PEN_OFFSET_CM * cos(odometryState.thetaRad);
-    odometryState.penYCm = odometryState.yCm + PEN_OFFSET_CM * sin(odometryState.thetaRad);
+    odometryState.penXCm = odometryState.xCm + penOffsetCm * cos(odometryState.thetaRad);
+    odometryState.penYCm = odometryState.yCm + penOffsetCm * sin(odometryState.thetaRad);
 
     Logger::log("Odometry resetPose : x=" + String(xCm, 2) +
                 " y=" + String(yCm, 2) +
@@ -92,5 +93,26 @@ namespace Odometry {
   void reset() {
     resetPose(0.0f, 0.0f, 0.0f);
     Logger::log("Odometrie remise a zero");
+  }
+
+  void setGeometry(float newWheelBaseCm, float newPenOffsetCm) {
+    if (newWheelBaseCm >= 1.0f) {
+      wheelBaseCm = newWheelBaseCm;
+    }
+
+    if (newPenOffsetCm >= 0.1f) {
+      penOffsetCm = newPenOffsetCm;
+    }
+
+    odometryState.penXCm = odometryState.xCm + penOffsetCm * cos(odometryState.thetaRad);
+    odometryState.penYCm = odometryState.yCm + penOffsetCm * sin(odometryState.thetaRad);
+  }
+
+  float getWheelBaseCm() {
+    return wheelBaseCm;
+  }
+
+  float getPenOffsetCm() {
+    return penOffsetCm;
   }
 }

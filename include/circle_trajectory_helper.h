@@ -13,6 +13,7 @@ namespace CircleTrajectoryHelper {
     int segments = 96;
     bool clockwise = true;
     StartMode startMode = StartMode::Bottom;
+    float distanceScale = 1.0f;
   };
 
   bool buildSmallCircle(TrajectoryGenerator::Trajectory& trajectory, const CircleRequest& request);

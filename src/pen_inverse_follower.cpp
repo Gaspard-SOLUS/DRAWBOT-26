@@ -265,8 +265,8 @@ namespace PenInverseFollower {
   void setConfig(const Config& newCfg) {
     cfg = newCfg;
 
-    if (cfg.wheelBaseCm < 1.0f) cfg.wheelBaseCm = 8.3f;
-    if (cfg.penOffsetCm < 0.1f) cfg.penOffsetCm = 13.0f;
+    if (cfg.wheelBaseCm < 1.0f) cfg.wheelBaseCm = RobotParams::WHEEL_BASE_CM;
+    if (cfg.penOffsetCm < 0.1f) cfg.penOffsetCm = RobotParams::PEN_OFFSET_CM;
     if (cfg.distanceScale <= 0.0f) cfg.distanceScale = 1.0f;
     if (cfg.penSpeedCms < 0.0f) cfg.penSpeedCms = 0.0f;
     if (cfg.penSpeedMaxCms < 0.1f) cfg.penSpeedMaxCms = 0.1f;
@@ -281,6 +281,7 @@ namespace PenInverseFollower {
     if (cfg.pwmSlewStep > 255) cfg.pwmSlewStep = 255;
     if (cfg.segmentToleranceCm < 0.01f) cfg.segmentToleranceCm = 0.01f;
 
+    Odometry::setGeometry(cfg.wheelBaseCm, cfg.penOffsetCm);
     applyPidConfig();
 
     Logger::log("Config PenInverseFollower mise a jour");
@@ -345,6 +346,7 @@ namespace PenInverseFollower {
 
     prefs.end();
 
+    Odometry::setGeometry(cfg.wheelBaseCm, cfg.penOffsetCm);
     applyPidConfig();
 
     Logger::log(hasConfig ? "Config PenInverseFollower chargee depuis flash"
@@ -408,6 +410,7 @@ namespace PenInverseFollower {
 
   void resetConfigToDefaults() {
     cfg = Config();
+    Odometry::setGeometry(cfg.wheelBaseCm, cfg.penOffsetCm);
     applyPidConfig();
     Logger::log("Config PenInverseFollower remise aux valeurs par defaut");
   }
@@ -417,6 +420,7 @@ namespace PenInverseFollower {
 
     copySegment(0, 0.0f, 0.0f, d, 0.0f);
 
+    Odometry::resetPose(-cfg.penOffsetCm, 0.0f, 0.0f);
     startSegments(1);
 
     Logger::log("Test ligne stylo : distance=" + String(distanceCm, 1) +
@@ -446,6 +450,7 @@ namespace PenInverseFollower {
     segments[0] = {p0, p1};
     segments[1] = {p1, p2};
 
+    Odometry::resetPose(-cfg.penOffsetCm, 0.0f, 0.0f);
     startSegments(2);
 
     Logger::log("Angle stylo lance : d1=" + String(d1Cm, 1) +
@@ -485,6 +490,7 @@ namespace PenInverseFollower {
     segments[1] = {p1, p2};
     segments[2] = {p2, p3};
 
+    Odometry::resetPose(-cfg.penOffsetCm, 0.0f, 0.0f);
     startSegments(3);
 
     Logger::log("Escalier stylo lance");

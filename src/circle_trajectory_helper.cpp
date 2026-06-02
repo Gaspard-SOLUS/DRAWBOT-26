@@ -33,7 +33,7 @@ namespace CircleTrajectoryHelper {
       centerY,
       startAngleDeg,
       request.clockwise,
-      1.0f
+      request.distanceScale
     );
   }
 

@@ -179,4 +179,93 @@ namespace TrajectoryGenerator {
 
     return true;
   }
+
+  bool generateNorthArrow(Trajectory& trajectory, float lengthCm, float distanceScale) {
+    clear(trajectory);
+
+    float length = lengthCm * distanceScale;
+    if (length < 3.0f) {
+      return false;
+    }
+
+    float headLength = constrain(length * 0.30f, 1.2f, length * 0.45f);
+    float halfWidth = constrain(headLength * 0.55f, 0.6f, 3.0f);
+    float shaftEnd = length - headLength;
+
+    Point tail {0.0f, 0.0f};
+    Point neck {shaftEnd, 0.0f};
+    Point leftBase {shaftEnd, halfWidth};
+    Point tip {length, 0.0f};
+    Point rightBase {shaftEnd, -halfWidth};
+
+    Point hatchLeft1 {shaftEnd + headLength * 0.25f, halfWidth * 0.55f};
+    Point hatchRight1 {shaftEnd + headLength * 0.25f, -halfWidth * 0.55f};
+    Point hatchLeft2 {shaftEnd + headLength * 0.55f, halfWidth * 0.30f};
+    Point hatchRight2 {shaftEnd + headLength * 0.55f, -halfWidth * 0.30f};
+
+    return addSegment(trajectory, tail, neck) &&
+           addSegment(trajectory, neck, leftBase) &&
+           addSegment(trajectory, leftBase, tip) &&
+           addSegment(trajectory, tip, rightBase) &&
+           addSegment(trajectory, rightBase, neck) &&
+           addSegment(trajectory, neck, hatchLeft1) &&
+           addSegment(trajectory, hatchLeft1, hatchRight1) &&
+           addSegment(trajectory, hatchRight1, hatchLeft2) &&
+           addSegment(trajectory, hatchLeft2, hatchRight2) &&
+           addSegment(trajectory, hatchRight2, tip);
+  }
+
+  bool generateCompassRoseOneLine(Trajectory& trajectory, float radiusCm, float distanceScale) {
+    clear(trajectory);
+
+    float radius = radiusCm * distanceScale;
+    if (radius < 3.0f) {
+      return false;
+    }
+
+    Point center {0.0f, 0.0f};
+    Point north {radius, 0.0f};
+
+    if (!addSegment(trajectory, center, north)) {
+      return false;
+    }
+
+    const int circleSegments = 64;
+    Point previous = north;
+    for (int i = 1; i <= circleSegments; i++) {
+      float angle = 2.0f * PI * ((float)i / (float)circleSegments);
+      Point current {radius * cos(angle), radius * sin(angle)};
+      if (!addSegment(trajectory, previous, current)) {
+        return false;
+      }
+      previous = current;
+    }
+
+    if (!addSegment(trajectory, previous, center)) {
+      return false;
+    }
+
+    for (int i = 0; i < 8; i++) {
+      float angle = degToRad(i * 45.0f);
+      float branchLength = (i % 2 == 0) ? radius : radius * 0.72f;
+      Point end {branchLength * cos(angle), branchLength * sin(angle)};
+
+      if (!addSegment(trajectory, center, end) ||
+          !addSegment(trajectory, end, center)) {
+        return false;
+      }
+    }
+
+    float headLength = constrain(radius * 0.22f, 0.8f, 2.5f);
+    float headWidth = constrain(radius * 0.14f, 0.5f, 1.8f);
+
+    Point leftHead {radius - headLength, headWidth};
+    Point rightHead {radius - headLength, -headWidth};
+
+    return addSegment(trajectory, center, north) &&
+           addSegment(trajectory, north, leftHead) &&
+           addSegment(trajectory, leftHead, north) &&
+           addSegment(trajectory, north, rightHead) &&
+           addSegment(trajectory, rightHead, north);
+  }
 }

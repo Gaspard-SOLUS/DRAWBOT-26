@@ -6,8 +6,10 @@ namespace Odometry {
   void update(unsigned long now);
   void reset();
 
-  // Réinitialise l'odométrie avec une position et une orientation imposées.
-  // Utile pour la séquence cercle : le stylo démarre sur le cercle et le robot est placé tangentiellement.
+  void setGeometry(float wheelBaseCm, float penOffsetCm);
+  float getWheelBaseCm();
+  float getPenOffsetCm();
+
   void resetPose(float xCm, float yCm, float thetaRad);
 
   float radToDeg(float rad);

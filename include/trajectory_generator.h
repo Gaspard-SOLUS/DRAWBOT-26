@@ -69,6 +69,18 @@ namespace TrajectoryGenerator {
     float distanceScale = 1.0f
   );
 
+  bool generateNorthArrow(
+    Trajectory& trajectory,
+    float lengthCm,
+    float distanceScale = 1.0f
+  );
+
+  bool generateCompassRoseOneLine(
+    Trajectory& trajectory,
+    float radiusCm,
+    float distanceScale = 1.0f
+  );
+
   float degToRad(float deg);
   float radToDeg(float rad);
   float distance(Point a, Point b);

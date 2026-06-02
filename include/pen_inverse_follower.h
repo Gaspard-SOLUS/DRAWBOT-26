@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "trajectory_generator.h"
+#include "robot.h"
 
 namespace PenInverseFollower {
   struct Point {
@@ -14,8 +15,8 @@ namespace PenInverseFollower {
   };
 
   struct Config {
-    float wheelBaseCm = 8.3f;
-    float penOffsetCm = 13.0f;
+    float wheelBaseCm = RobotParams::WHEEL_BASE_CM;
+    float penOffsetCm = RobotParams::PEN_OFFSET_CM;
 
     // Correction globale des distances demandées.
     // Exemple : demandé 20 cm, réel 16 cm => distanceScale = 20 / 16 = 1.25.

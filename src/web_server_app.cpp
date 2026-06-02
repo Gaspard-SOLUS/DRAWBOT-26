@@ -11,7 +11,10 @@
 #include "sensors.h"
 #include "logger.h"
 #include "pen_inverse_follower.h"
+#include "page_s2_escalier.h"
 #include "page_s2_cercle.h"
+#include "web_api_s2_escalier.h"
+#include "web_api_motor_calibration.h"
 #include "trajectory_generator.h"
 #include "circle_trajectory_helper.h"
 
@@ -72,7 +75,7 @@ static void handleSoutenance2() {
 }
 
 static void handleSoutenance2Escalier() {
-  server.send(200, "text/html", WebPages::soutenance2Escalier());
+  server.send(200, "text/html", PageS2Escalier::html());
 }
 
 static void handleSoutenance2Cercle() {
@@ -105,6 +108,8 @@ static void applyPenInverseConfigFromRequest() {
 
   if (server.hasArg("penSpeedMax")) cfg.penSpeedMaxCms = server.arg("penSpeedMax").toFloat();
   if (server.hasArg("wheelSpeedMax")) cfg.wheelSpeedMaxCms = server.arg("wheelSpeedMax").toFloat();
+  if (server.hasArg("maxOmega")) cfg.maxOmegaRadS = server.arg("maxOmega").toFloat();
+  if (server.hasArg("maxNormalCorrection")) cfg.maxNormalCorrectionCms = server.arg("maxNormalCorrection").toFloat();
 
   if (server.hasArg("kp")) cfg.kp = server.arg("kp").toFloat();
   if (server.hasArg("ki")) cfg.ki = server.arg("ki").toFloat();
@@ -115,12 +120,20 @@ static void applyPenInverseConfigFromRequest() {
   if (server.hasArg("coefR")) cfg.coefRightCmsPerPwm = server.arg("coefR").toFloat();
 
   if (server.hasArg("minPwm")) cfg.minPwm = server.arg("minPwm").toInt();
+  if (server.hasArg("minCommandSpeed")) cfg.minCommandSpeedCms = server.arg("minCommandSpeed").toFloat();
   if (server.hasArg("pwmSlewStep")) cfg.pwmSlewStep = server.arg("pwmSlewStep").toInt();
   if (server.hasArg("pwmDither")) cfg.pwmDither = (server.arg("pwmDither").toInt() != 0);
   if (server.hasArg("allowReverse")) cfg.allowReverse = (server.arg("allowReverse").toInt() != 0);
   if (server.hasArg("minForwardSpeed")) cfg.minForwardSpeedCms = server.arg("minForwardSpeed").toFloat();
 
   if (server.hasArg("segTol")) cfg.segmentToleranceCm = server.arg("segTol").toFloat();
+
+  if (server.hasArg("cornerMode")) cfg.cornerMode = (server.arg("cornerMode").toInt() != 0);
+  if (server.hasArg("cornerApproach")) cfg.cornerApproachCm = server.arg("cornerApproach").toFloat();
+  if (server.hasArg("cornerSpeed")) cfg.cornerSpeedCms = server.arg("cornerSpeed").toFloat();
+  if (server.hasArg("cornerOmega")) cfg.cornerOmegaRadS = server.arg("cornerOmega").toFloat();
+  if (server.hasArg("cornerExitAngle")) cfg.cornerExitAngleDeg = server.arg("cornerExitAngle").toFloat();
+  if (server.hasArg("cornerMaxDuration")) cfg.cornerMaxDurationS = server.arg("cornerMaxDuration").toFloat();
 
   PenInverseFollower::setConfig(cfg);
 }
@@ -262,6 +275,10 @@ static void handleStatus() {
   json += "\"followerFinished\":" + String(pf.finished ? "true" : "false") + ",";
   json += "\"followerSegment\":" + String(pf.currentSegment) + ",";
   json += "\"followerSegmentCount\":" + String(pf.segmentCount) + ",";
+  json += "\"followerPhase\":\"" + pf.phaseName + "\",";
+  json += "\"followerCornerActive\":" + String(pf.cornerActive ? "true" : "false") + ",";
+  json += "\"followerRemainingToCorner\":" + String(pf.remainingToCornerCm, 3) + ",";
+  json += "\"followerCornerAngleError\":" + String(pf.cornerAngleErrorDeg, 3) + ",";
 
   json += "\"followerPenX\":" + String(pf.penX, 3) + ",";
   json += "\"followerPenY\":" + String(pf.penY, 3) + ",";
@@ -281,7 +298,10 @@ static void handleStatus() {
   json += "\"followerVLeft\":" + String(pf.vLeftCms, 3) + ",";
   json += "\"followerVRight\":" + String(pf.vRightCms, 3) + ",";
   json += "\"followerPwmLeft\":" + String(pf.pwmLeft) + ",";
-  json += "\"followerPwmRight\":" + String(pf.pwmRight);
+  json += "\"followerPwmRight\":" + String(pf.pwmRight) + ",";
+  json += "\"followerReverseLimited\":" + String(pf.reverseLimited ? "true" : "false") + ",";
+  json += "\"followerOmegaLimited\":" + String(pf.omegaLimited ? "true" : "false") + ",";
+  json += "\"followerNormalLimited\":" + String(pf.normalCorrectionLimited ? "true" : "false");
 
   json += "}";
 
@@ -413,8 +433,7 @@ static void handleS2EscalierStop() {
 }
 
 // ==================================================
-// API SOUTENANCE 2 - CERCLE / ROSE DES VENTS
-// Pour l'instant, ces routes sont des points d'entrée à compléter plus tard.
+// API SOUTENANCE 2 - CERCLE / ROSE DES VENTS / ONE-LINE
 // ==================================================
 static void handleS2Test() {
   Logger::log("Test soutenance 2 appele");
@@ -430,15 +449,107 @@ static bool parseBoolArg(const char* name, bool defaultValue) {
   return value == "1" || value == "true" || value == "yes" || value == "oui";
 }
 
+static float parseFloatArg2(const char* primary, const char* fallback, float defaultValue) {
+  if (server.hasArg(primary)) return server.arg(primary).toFloat();
+  if (fallback != nullptr && server.hasArg(fallback)) return server.arg(fallback).toFloat();
+  return defaultValue;
+}
+
+static int parseIntArg2(const char* primary, const char* fallback, int defaultValue) {
+  if (server.hasArg(primary)) return server.arg(primary).toInt();
+  if (fallback != nullptr && server.hasArg(fallback)) return server.arg(fallback).toInt();
+  return defaultValue;
+}
+
+static void alignOdometryToTrajectoryStart(
+  const TrajectoryGenerator::Trajectory& trajectory,
+  float robotHeadingRad
+) {
+  if (trajectory.count <= 0) return;
+
+  PenInverseFollower::Config cfg = PenInverseFollower::getConfig();
+  const TrajectoryGenerator::Point& start = trajectory.segments[0].a;
+
+  float baseX = start.x - cfg.penOffsetCm * cos(robotHeadingRad);
+  float baseY = start.y - cfg.penOffsetCm * sin(robotHeadingRad);
+
+  Odometry::resetPose(baseX, baseY, robotHeadingRad);
+}
+
+static bool parsePolylinePoint(const String& token, TrajectoryGenerator::Point& point) {
+  String trimmed = token;
+  trimmed.trim();
+
+  int sep = trimmed.indexOf(',');
+  if (sep < 0) sep = trimmed.indexOf(':');
+  if (sep <= 0 || sep >= trimmed.length() - 1) {
+    return false;
+  }
+
+  point.x = trimmed.substring(0, sep).toFloat();
+  point.y = trimmed.substring(sep + 1).toFloat();
+  return true;
+}
+
+static bool buildPolylineTrajectory(
+  TrajectoryGenerator::Trajectory& trajectory,
+  String encodedPoints,
+  float scale
+) {
+  TrajectoryGenerator::clear(trajectory);
+  encodedPoints.trim();
+
+  if (encodedPoints.length() == 0) {
+    return false;
+  }
+
+  bool hasPrevious = false;
+  TrajectoryGenerator::Point previous;
+  int pointCount = 0;
+  int start = 0;
+
+  while (start <= encodedPoints.length()) {
+    int end = encodedPoints.indexOf(';', start);
+    if (end < 0) end = encodedPoints.length();
+
+    String token = encodedPoints.substring(start, end);
+    token.trim();
+
+    if (token.length() > 0) {
+      TrajectoryGenerator::Point current;
+      if (!parsePolylinePoint(token, current)) {
+        return false;
+      }
+
+      current.x *= scale;
+      current.y *= scale;
+
+      if (hasPrevious && !TrajectoryGenerator::addSegment(trajectory, previous, current)) {
+        return false;
+      }
+
+      previous = current;
+      hasPrevious = true;
+      pointCount++;
+    }
+
+    start = end + 1;
+  }
+
+  return pointCount >= 2 && trajectory.count > 0;
+}
+
 static void handleS2CercleStartSmall() {
   applyPenInverseConfigFromRequest();
 
   PenInverseFollower::Config cfg = PenInverseFollower::getConfig();
 
   CircleTrajectoryHelper::CircleRequest req;
-  req.radiusCm = server.hasArg("radius") ? server.arg("radius").toFloat() : 5.0f;
-  req.segments = server.hasArg("segments") ? server.arg("segments").toInt() : 96;
+  req.radiusCm = parseFloatArg2("radius", "r", 5.0f);
+  req.radiusCm = constrain(req.radiusCm, 2.0f, 20.0f);
+  req.segments = parseIntArg2("segments", "n", 96);
   req.clockwise = parseBoolArg("clockwise", true);
+  req.distanceScale = cfg.distanceScale;
 
   String startMode = server.hasArg("startMode") ? server.arg("startMode") : "bottom";
   startMode.toLowerCase();
@@ -499,15 +610,107 @@ static void handleS2CercleStop() {
 }
 
 static void handleS2RoseStart() {
+  applyPenInverseConfigFromRequest();
+
+  if (!sensorState.magOk) {
+    Logger::log("Erreur : magnetometre indisponible pour la sequence Nord");
+    server.send(503, "text/plain", "MAGNETOMETER_NOT_AVAILABLE");
+    return;
+  }
+
+  PenInverseFollower::Config cfg = PenInverseFollower::getConfig();
+
   float length = server.hasArg("length") ? server.arg("length").toFloat() : 10.0f;
-  int pwm = server.hasArg("pwm") ? server.arg("pwm").toInt() : 150;
+  length = constrain(length, 3.0f, 30.0f);
 
-  Logger::log("Demande sequence ROSE DES VENTS");
-  Logger::log("longueur=" + String(length, 1) +
-              " pwm=" + String(pwm) +
-              " capMag=" + String(sensorState.headingMagDeg, 1));
+  float northOffsetDeg = server.hasArg("northOffset") ? server.arg("northOffset").toFloat() : 0.0f;
 
-  server.send(200, "text/plain", "S2_ROSE_START");
+  String shape = server.hasArg("shape") ? server.arg("shape") : "arrow";
+  shape.toLowerCase();
+
+  TrajectoryGenerator::Trajectory trajectory;
+  bool ok = false;
+
+  if (shape == "rose") {
+    ok = TrajectoryGenerator::generateCompassRoseOneLine(
+      trajectory,
+      length,
+      cfg.distanceScale
+    );
+  } else {
+    ok = TrajectoryGenerator::generateNorthArrow(
+      trajectory,
+      length,
+      cfg.distanceScale
+    );
+  }
+
+  if (!ok) {
+    Logger::log("Erreur : impossible de generer la trajectoire Nord");
+    server.send(400, "text/plain", "NORTH_TRAJECTORY_ERROR");
+    return;
+  }
+
+  float robotHeadingRad = TrajectoryGenerator::degToRad(sensorState.headingMagDeg + northOffsetDeg);
+  alignOdometryToTrajectoryStart(trajectory, robotHeadingRad);
+
+  if (!PenInverseFollower::startTrajectory(trajectory)) {
+    server.send(500, "text/plain", "FOLLOWER_START_ERROR");
+    return;
+  }
+
+  Logger::log("Sequence Nord lancee : forme=" + shape +
+              " longueur=" + String(length, 1) +
+              " capMag=" + String(sensorState.headingMagDeg, 1) +
+              " offset=" + String(northOffsetDeg, 1) +
+              " segments=" + String(trajectory.count));
+
+  server.send(200, "text/plain", "S2_NORTH_TRAJECTORY_START");
+}
+
+static void handleS2PolylineStart() {
+  applyPenInverseConfigFromRequest();
+
+  if (!server.hasArg("points")) {
+    server.send(400, "text/plain", "MISSING_POINTS_ARG");
+    return;
+  }
+
+  PenInverseFollower::Config cfg = PenInverseFollower::getConfig();
+  float artScale = server.hasArg("scale") ? server.arg("scale").toFloat() : 1.0f;
+  if (artScale <= 0.0f) artScale = 1.0f;
+
+  TrajectoryGenerator::Trajectory trajectory;
+  if (!buildPolylineTrajectory(trajectory, server.arg("points"), artScale * cfg.distanceScale)) {
+    Logger::log("Erreur : polyligne invalide ou trop longue");
+    server.send(400, "text/plain", "POLYLINE_PARSE_ERROR");
+    return;
+  }
+
+  float robotHeadingRad = 0.0f;
+  String initialMode = server.hasArg("initialHeadingMode") ? server.arg("initialHeadingMode") : "tangent";
+  initialMode.toLowerCase();
+
+  if (initialMode == "heading" && server.hasArg("headingDeg")) {
+    robotHeadingRad = TrajectoryGenerator::degToRad(server.arg("headingDeg").toFloat());
+  } else {
+    const TrajectoryGenerator::Point& a = trajectory.segments[0].a;
+    const TrajectoryGenerator::Point& b = trajectory.segments[0].b;
+    robotHeadingRad = atan2(b.y - a.y, b.x - a.x);
+  }
+
+  alignOdometryToTrajectoryStart(trajectory, robotHeadingRad);
+
+  if (!PenInverseFollower::startTrajectory(trajectory)) {
+    server.send(500, "text/plain", "FOLLOWER_START_ERROR");
+    return;
+  }
+
+  Logger::log("One-line polyline lancee : segments=" + String(trajectory.count) +
+              " scale=" + String(artScale, 3) +
+              " heading=" + String(Odometry::normalizeAngleDeg(Odometry::radToDeg(robotHeadingRad)), 1));
+
+  server.send(200, "text/plain", "S2_POLYLINE_START");
 }
 
 // ==================================================
@@ -550,20 +753,14 @@ namespace WebApp {
     server.on("/api/s2/test", handleS2Test);
 
     // API escalier avec suivi inverse du stylo
-    server.on("/api/s2/escalier/config", handleS2EscalierConfigGet);
-    server.on("/api/s2/escalier/config/set", handleS2EscalierConfigSet);
-    server.on("/api/s2/escalier/follower/status", handleS2EscalierFollowerStatus);
+    WebApiS2Escalier::registerRoutes(server);
+    WebApiMotorCalibration::registerRoutes(server);
 
-    server.on("/api/s2/escalier/start-line", handleS2EscalierStartLine);
-    server.on("/api/s2/escalier/start-angle", handleS2EscalierStartAngle);
-    server.on("/api/s2/escalier/start", handleS2EscalierStart);
-    server.on("/api/s2/escalier/stop", handleS2EscalierStop);
-
-    // API futures séquences
     server.on("/api/s2/cercle/start", handleS2CercleStart);
     server.on("/api/s2/cercle/start-small", handleS2CercleStartSmall);
     server.on("/api/s2/cercle/stop", handleS2CercleStop);
     server.on("/api/s2/rose/start", handleS2RoseStart);
+    server.on("/api/s2/polyline/start", handleS2PolylineStart);
 
     server.begin();
 

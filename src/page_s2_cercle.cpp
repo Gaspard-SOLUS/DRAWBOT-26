@@ -85,13 +85,13 @@ String html() {
 <section class="card">
   <h2>3. PID</h2>
   <label>Kp</label>
-  <input id="kp" type="number" value="8" step="0.1">
+  <input id="kp" type="number" value="0.02" step="0.01">
 
   <label>Ki</label>
   <input id="ki" type="number" value="0.00" step="0.01">
 
   <label>Kd</label>
-  <input id="kd" type="number" value="4" step="0.1">
+  <input id="kd" type="number" value="0.015" step="0.005">
 
   <label>Limite intégrale</label>
   <input id="iLimit" type="number" value="5" step="1">
@@ -134,7 +134,7 @@ String html() {
   </p>
 
   <label>Tolérance segment — cm</label>
-  <input id="segTol" type="number" value="0.08" step="0.01">
+  <input id="segTol" type="number" value="0.05" step="0.01">
 </section>
 
 <section class="card">

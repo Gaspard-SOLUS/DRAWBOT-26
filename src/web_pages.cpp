@@ -926,11 +926,23 @@ refreshLogs();
       <section class="card">
         <h2>Rose des vents</h2>
 
-        <label>Longueur flèche en cm</label>
+        <label>Forme</label>
+        <select id="compassShape">
+          <option value="arrow">Fleche Nord</option>
+          <option value="rose">Rose 8 directions</option>
+        </select><br>
+
+        <label>Longueur / rayon en cm</label>
         <input id="compassLength" type="number" value="10" min="3" max="30" step="0.1"><br>
 
-        <label>PWM rotation</label>
-        <input id="compassPwm" type="number" value="150" min="80" max="255" step="1">
+        <label>Correction Nord en degres</label>
+        <input id="northOffset" type="number" value="0" min="-180" max="180" step="1"><br>
+
+        <label>Echelle distance</label>
+        <input id="distanceScale" type="number" value="1.0" min="0.1" max="5" step="0.01"><br>
+
+        <label>Vitesse stylo en cm/s</label>
+        <input id="penSpeed" type="number" value="0.7" min="0.1" max="5" step="0.1">
 
         <br><br>
         <button class="btn-purple" onclick="startCompass()">
@@ -957,8 +969,11 @@ refreshLogs();
   <script>
   async function startCompass() {
     const params = new URLSearchParams();
+    params.append("shape", document.getElementById("compassShape").value);
     params.append("length", document.getElementById("compassLength").value);
-    params.append("pwm", document.getElementById("compassPwm").value);
+    params.append("northOffset", document.getElementById("northOffset").value);
+    params.append("distanceScale", document.getElementById("distanceScale").value);
+    params.append("penSpeed", document.getElementById("penSpeed").value);
 
     await fetch("/api/s2/rose/start?" + params.toString());
   }
