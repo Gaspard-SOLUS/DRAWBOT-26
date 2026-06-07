@@ -47,6 +47,10 @@ namespace {
     if (server().hasArg("minPwm")) cfg.minPwm = server().arg("minPwm").toInt();
     if (server().hasArg("minCommandSpeed")) cfg.minCommandSpeedCms = server().arg("minCommandSpeed").toFloat();
     if (server().hasArg("pwmSlewStep")) cfg.pwmSlewStep = server().arg("pwmSlewStep").toInt();
+    if (server().hasArg("straightEncoderKp")) cfg.straightEncoderKp = server().arg("straightEncoderKp").toFloat();
+    if (server().hasArg("straightStopCompensation")) cfg.straightStopCompensationCm = server().arg("straightStopCompensation").toFloat();
+    if (server().hasArg("straightStopDecel")) cfg.straightStopDecelCms2 = server().arg("straightStopDecel").toFloat();
+    if (server().hasArg("straightBrakeMs")) cfg.straightBrakeMs = server().arg("straightBrakeMs").toInt();
 
     if (server().hasArg("segTol")) cfg.segmentToleranceCm = server().arg("segTol").toFloat();
 
@@ -55,6 +59,8 @@ namespace {
     if (server().hasArg("cornerSpeed")) cfg.cornerSpeedCms = server().arg("cornerSpeed").toFloat();
     if (server().hasArg("cornerOmega")) cfg.cornerOmegaRadS = server().arg("cornerOmega").toFloat();
     if (server().hasArg("cornerExitAngle")) cfg.cornerExitAngleDeg = server().arg("cornerExitAngle").toFloat();
+    if (server().hasArg("cornerInnerBoost")) cfg.cornerInnerBoost = server().arg("cornerInnerBoost").toFloat();
+    if (server().hasArg("cornerTurnMinPwm")) cfg.cornerTurnMinPwm = server().arg("cornerTurnMinPwm").toInt();
     if (server().hasArg("cornerMaxDuration")) cfg.cornerMaxDurationS = server().arg("cornerMaxDuration").toFloat();
 
     PenInverseFollower::setConfig(cfg);
@@ -91,6 +97,10 @@ namespace {
     json += "\"minPwm\":" + String(cfg.minPwm) + ",";
     json += "\"minCommandSpeed\":" + String(cfg.minCommandSpeedCms, 3) + ",";
     json += "\"pwmSlewStep\":" + String(cfg.pwmSlewStep) + ",";
+    json += "\"straightEncoderKp\":" + String(cfg.straightEncoderKp, 3) + ",";
+    json += "\"straightStopCompensation\":" + String(cfg.straightStopCompensationCm, 3) + ",";
+    json += "\"straightStopDecel\":" + String(cfg.straightStopDecelCms2, 3) + ",";
+    json += "\"straightBrakeMs\":" + String(cfg.straightBrakeMs) + ",";
 
     json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3) + ",";
 
@@ -99,6 +109,8 @@ namespace {
     json += "\"cornerSpeed\":" + String(cfg.cornerSpeedCms, 3) + ",";
     json += "\"cornerOmega\":" + String(cfg.cornerOmegaRadS, 3) + ",";
     json += "\"cornerExitAngle\":" + String(cfg.cornerExitAngleDeg, 3) + ",";
+    json += "\"cornerInnerBoost\":" + String(cfg.cornerInnerBoost, 3) + ",";
+    json += "\"cornerTurnMinPwm\":" + String(cfg.cornerTurnMinPwm) + ",";
     json += "\"cornerMaxDuration\":" + String(cfg.cornerMaxDurationS, 3);
 
     json += "}";
@@ -140,6 +152,8 @@ namespace {
     json += "\"pwmRight\":" + String(st.pwmRight) + ",";
     json += "\"targetPwmLeft\":" + String(st.targetPwmLeft) + ",";
     json += "\"targetPwmRight\":" + String(st.targetPwmRight) + ",";
+    json += "\"encoderBalanceError\":" + String(st.encoderBalanceErrorCm, 3) + ",";
+    json += "\"straightStopDistance\":" + String(st.straightStopDistanceCm, 3) + ",";
 
     json += "\"reverseLimited\":" + String(st.reverseLimited ? "true" : "false") + ",";
     json += "\"omegaLimited\":" + String(st.omegaLimited ? "true" : "false") + ",";

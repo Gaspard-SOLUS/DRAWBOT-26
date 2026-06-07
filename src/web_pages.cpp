@@ -590,8 +590,32 @@ refreshLogs();
         <label>Coefficient moteur droit — cm/s/PWM</label>
         <input id="coefR" type="number" value="0.080" step="0.001">
 
+        <label>Échelle distance</label>
+        <input id="distanceScale" type="number" value="0.930" step="0.01">
+
         <label>PWM minimum</label>
-        <input id="minPwm" type="number" value="90" min="0" max="255" step="1">
+        <input id="minPwm" type="number" value="180" min="0" max="255" step="1">
+
+        <label>Rampe PWM / cycle</label>
+        <input id="pwmSlewStep" type="number" value="20" step="1">
+
+        <label>Correction ligne encodeurs</label>
+        <input id="straightEncoderKp" type="number" value="22" step="1">
+
+        <label>Compensation arrêt — cm</label>
+        <input id="straightStopCompensation" type="number" value="0.00" step="0.01">
+
+        <label>Décélération arrêt — cm/s²</label>
+        <input id="straightStopDecel" type="number" value="0" step="10">
+
+        <label>Frein arrêt — ms</label>
+        <input id="straightBrakeMs" type="number" value="80" step="10">
+
+        <label>Autoriser marche arrière</label>
+        <select id="allowReverse">
+          <option value="0">Non</option>
+          <option value="1">Oui</option>
+        </select>
 
         <p>
           Le PWM minimum sert à compenser les frottements : si une roue doit bouger,
@@ -674,7 +698,14 @@ refreshLogs();
 
     params.append("coefL", getValue("coefL"));
     params.append("coefR", getValue("coefR"));
+    params.append("distanceScale", getValue("distanceScale"));
     params.append("minPwm", getValue("minPwm"));
+    params.append("pwmSlewStep", getValue("pwmSlewStep"));
+    params.append("straightEncoderKp", getValue("straightEncoderKp"));
+    params.append("straightStopCompensation", getValue("straightStopCompensation"));
+    params.append("straightStopDecel", getValue("straightStopDecel"));
+    params.append("straightBrakeMs", getValue("straightBrakeMs"));
+    params.append("allowReverse", getValue("allowReverse"));
 
     params.append("segTol", getValue("segTol"));
   }
@@ -709,7 +740,14 @@ refreshLogs();
 
     document.getElementById("coefL").value = d.coefL;
     document.getElementById("coefR").value = d.coefR;
+    document.getElementById("distanceScale").value = d.distanceScale;
     document.getElementById("minPwm").value = d.minPwm;
+    document.getElementById("pwmSlewStep").value = d.pwmSlewStep;
+    document.getElementById("straightEncoderKp").value = d.straightEncoderKp;
+    document.getElementById("straightStopCompensation").value = d.straightStopCompensation;
+    document.getElementById("straightStopDecel").value = d.straightStopDecel;
+    document.getElementById("straightBrakeMs").value = d.straightBrakeMs;
+    document.getElementById("allowReverse").value = d.allowReverse ? 1 : 0;
 
     document.getElementById("segTol").value = d.segTol;
   }

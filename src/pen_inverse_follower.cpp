@@ -5,6 +5,7 @@
 #include "pen_inverse_follower.h"
 #include "app_state.h"
 #include "odometry.h"
+#include "encodeurs.h"
 #include "moteurs.h"
 #include "logger.h"
 
@@ -32,14 +33,27 @@ namespace {
 
   bool running = false;
   bool finished = false;
+  bool straightLineMode = false;
+  bool straightBrakeActive = false;
+  float straightTargetCm = 0.0f;
+  float straightStartLeftCm = 0.0f;
+  float straightStartRightCm = 0.0f;
+  unsigned long straightBrakeEndMs = 0;
+  int straightDirection = 1;
 
   PID pidLine;
 
   int lastPwmLeft = 0;
   int lastPwmRight = 0;
+  unsigned long pwmTraceTick = 0;
+  unsigned long lastPwmTraceMs = 0;
+  float pulseAccumulatorLeft = 0.0f;
+  float pulseAccumulatorRight = 0.0f;
+  int straightLockSegmentIndex = -1;
+  float straightLockStartLeftCm = 0.0f;
+  float straightLockStartRightCm = 0.0f;
 
-  float ditherAccumulatorLeft = 0.0f;
-  float ditherAccumulatorRight = 0.0f;
+  void resetStraightLock();
 
   float clampFloat(float value, float minValue, float maxValue) {
     if (value < minValue) return minValue;
@@ -49,6 +63,16 @@ namespace {
 
   float degToRad(float deg) {
     return deg * PI / 180.0f;
+  }
+
+  float radToDeg(float rad) {
+    return rad * 180.0f / PI;
+  }
+
+  float normalizeRad(float angle) {
+    while (angle > PI) angle -= 2.0f * PI;
+    while (angle < -PI) angle += 2.0f * PI;
+    return angle;
   }
 
   void resetPid(PID& pid) {
@@ -124,7 +148,155 @@ namespace {
     return (int)round(speedCms / cfg.coefRightCmsPerPwm);
   }
 
-  int ditherPwmCommand(int rawPwm, float& accumulator) {
+  int continuousPwmCommand(int rawPwm) {
+    return applyMinPwm(rawPwm);
+  }
+
+  void scaledWheelPwmCommands(float vLeftDesired,
+                              float vRightDesired,
+                              int& pwmLeftTarget,
+                              int& pwmRightTarget) {
+    int rawLeft = leftSpeedToRawPwm(vLeftDesired);
+    int rawRight = rightSpeedToRawPwm(vRightDesired);
+
+    if (rawLeft == 0 && rawRight == 0) {
+      pwmLeftTarget = 0;
+      pwmRightTarget = 0;
+      return;
+    }
+
+    float scale = 1.0f;
+
+    if (rawLeft != 0 && abs(rawLeft) < cfg.minPwm) {
+      scale = fmax(scale, ((float)cfg.minPwm) / ((float)abs(rawLeft)));
+    }
+
+    if (rawRight != 0 && abs(rawRight) < cfg.minPwm) {
+      scale = fmax(scale, ((float)cfg.minPwm) / ((float)abs(rawRight)));
+    }
+
+    float scaledLeft = ((float)rawLeft) * scale;
+    float scaledRight = ((float)rawRight) * scale;
+    float maxAbs = fmax(fabs(scaledLeft), fabs(scaledRight));
+
+    if (maxAbs > 255.0f) {
+      float downScale = 255.0f / maxAbs;
+      scaledLeft *= downScale;
+      scaledRight *= downScale;
+    }
+
+    pwmLeftTarget = applyMinPwm((int)round(scaledLeft));
+    pwmRightTarget = applyMinPwm((int)round(scaledRight));
+  }
+
+  int signFromPwmOrSpeed(int pwm, float speedCms, int fallbackSign) {
+    if (pwm > 0) return 1;
+    if (pwm < 0) return -1;
+    if (speedCms > 0.01f) return 1;
+    if (speedCms < -0.01f) return -1;
+    return fallbackSign;
+  }
+
+  void boostInnerWheelPwmInCorner(float vLeftDesired,
+                                  float vRightDesired,
+                                  int& pwmLeftTarget,
+                                  int& pwmRightTarget) {
+    if (cfg.cornerInnerBoost <= 0.0f) {
+      return;
+    }
+
+    int absLeft = abs(pwmLeftTarget);
+    int absRight = abs(pwmRightTarget);
+
+    if ((absLeft == 0 && absRight == 0) || absLeft == absRight) {
+      return;
+    }
+
+    float boost = clampFloat(cfg.cornerInnerBoost, 0.0f, 1.0f);
+
+    if (absLeft < absRight) {
+      int boosted = absLeft + (int)round(((float)(absRight - absLeft)) * boost);
+      if (boosted > 0) {
+        boosted = constrain(boosted, cfg.minPwm, 255);
+        int sign = signFromPwmOrSpeed(pwmLeftTarget, vLeftDesired, pwmRightTarget >= 0 ? 1 : -1);
+        pwmLeftTarget = sign * boosted;
+      }
+    } else {
+      int boosted = absRight + (int)round(((float)(absLeft - absRight)) * boost);
+      if (boosted > 0) {
+        boosted = constrain(boosted, cfg.minPwm, 255);
+        int sign = signFromPwmOrSpeed(pwmRightTarget, vRightDesired, pwmLeftTarget >= 0 ? 1 : -1);
+        pwmRightTarget = sign * boosted;
+      }
+    }
+  }
+
+  int applyMinimumAbsPwm(int pwm, int minAbsPwm) {
+    if (pwm == 0) {
+      return 0;
+    }
+
+    int sign = pwm > 0 ? 1 : -1;
+    int absPwm = abs(pwm);
+
+    if (absPwm < minAbsPwm) {
+      absPwm = minAbsPwm;
+    }
+
+    if (absPwm > 255) {
+      absPwm = 255;
+    }
+
+    return sign * absPwm;
+  }
+
+  void applyCornerTurnMinimum(int& pwmLeftTarget, int& pwmRightTarget) {
+    int minTurnPwm = cfg.cornerTurnMinPwm;
+    if (minTurnPwm < cfg.minPwm) {
+      minTurnPwm = cfg.minPwm;
+    }
+    if (minTurnPwm > 255) {
+      minTurnPwm = 255;
+    }
+
+    pwmLeftTarget = applyMinimumAbsPwm(pwmLeftTarget, minTurnPwm);
+    pwmRightTarget = applyMinimumAbsPwm(pwmRightTarget, minTurnPwm);
+  }
+
+  void printPwmTrace(unsigned long now,
+                     int pwmLeftTarget,
+                     int pwmRightTarget,
+                     int pwmLeft,
+                     int pwmRight,
+                     float vLeftDesired,
+                     float vRightDesired,
+                     float remainingToCorner) {
+    if (segmentCount <= 1) {
+      return;
+    }
+
+    if (lastPwmTraceMs != 0 && now - lastPwmTraceMs < 100) {
+      return;
+    }
+    lastPwmTraceMs = now;
+
+    String line = "PF tick=" + String(++pwmTraceTick) +
+                  " t=" + String(now) +
+                  " seg=" + String(segmentIndex + 1) + "/" + String(segmentCount) +
+                  " ph=" + status.phaseName +
+                  " tgt=" + String(pwmLeftTarget) + "/" + String(pwmRightTarget) +
+                  " pwm=" + String(pwmLeft) + "/" + String(pwmRight) +
+                  " v=" + String(vLeftDesired, 1) + "/" + String(vRightDesired, 1) +
+                  " spd=" + String(odometryState.speedLeftCms, 1) + "/" + String(odometryState.speedRightCms, 1) +
+                  " rem=" + String(remainingToCorner, 2);
+    Logger::trace(line);
+  }
+
+  bool isPulseRange(int rawPwm) {
+    return cfg.minPwm > 0 && rawPwm != 0 && abs(rawPwm) < cfg.minPwm;
+  }
+
+  int pulsePwmCommand(int rawPwm, float& accumulator) {
     if (rawPwm == 0) {
       accumulator = 0.0f;
       return 0;
@@ -133,25 +305,13 @@ namespace {
     int sign = (rawPwm > 0) ? 1 : -1;
     int absRaw = abs(rawPwm);
 
-    if (!cfg.pwmDither) {
+    if (!isPulseRange(rawPwm)) {
+      accumulator = 0.0f;
       return applyMinPwm(rawPwm);
     }
 
-    if (absRaw >= cfg.minPwm) {
-      accumulator = 0.0f;
-      return constrain(rawPwm, -255, 255);
-    }
-
-    if (cfg.minPwm <= 0) {
-      return constrain(rawPwm, -255, 255);
-    }
-
-    // Pulse-density modulation:
-    // exemple raw=45 et minPwm=180 => duty=0.25.
-    // On envoie une impulsion à 180 environ un cycle sur quatre.
     float duty = ((float)absRaw) / ((float)cfg.minPwm);
     duty = clampFloat(duty, 0.0f, 1.0f);
-
     accumulator += duty;
 
     if (accumulator >= 1.0f) {
@@ -162,8 +322,26 @@ namespace {
     return 0;
   }
 
-  bool isSmallDitherCommand(int rawPwm) {
-    return cfg.pwmDither && cfg.minPwm > 0 && abs(rawPwm) > 0 && abs(rawPwm) < cfg.minPwm;
+  int applyContinuousSlew(int previous, int target, bool directSignFlip = false) {
+    target = applyMinPwm(target);
+
+    if (target == 0) {
+      return 0;
+    }
+
+    if (previous == 0) {
+      return target;
+    }
+
+    if ((previous > 0 && target < 0) || (previous < 0 && target > 0)) {
+      if (directSignFlip) {
+        return target;
+      }
+
+      return 0;
+    }
+
+    return applyMinPwm(applySlew(previous, target));
   }
 
   float pwmToLeftSpeed(int pwm) {
@@ -188,8 +366,13 @@ namespace {
   void hardStopMotorsTracked() {
     lastPwmLeft = 0;
     lastPwmRight = 0;
-    ditherAccumulatorLeft = 0.0f;
-    ditherAccumulatorRight = 0.0f;
+    pwmTraceTick = 0;
+    lastPwmTraceMs = 0;
+    pulseAccumulatorLeft = 0.0f;
+    pulseAccumulatorRight = 0.0f;
+    resetStraightLock();
+    straightLineMode = false;
+    straightBrakeActive = false;
     status.pwmLeft = 0;
     status.pwmRight = 0;
     status.targetPwmLeft = 0;
@@ -203,6 +386,8 @@ namespace {
     status.vRightCms = 0.0f;
     status.vCenterCms = 0.0f;
     status.omegaRadS = 0.0f;
+    status.encoderBalanceErrorCm = 0.0f;
+    status.straightStopDistanceCm = 0.0f;
 
     setMotorPwmTracked(0, 0);
     stopMotors();
@@ -229,8 +414,13 @@ namespace {
 
     lastPwmLeft = 0;
     lastPwmRight = 0;
-    ditherAccumulatorLeft = 0.0f;
-    ditherAccumulatorRight = 0.0f;
+    pwmTraceTick = 0;
+    lastPwmTraceMs = 0;
+    pulseAccumulatorLeft = 0.0f;
+    pulseAccumulatorRight = 0.0f;
+    resetStraightLock();
+    straightLineMode = false;
+    straightBrakeActive = false;
 
     applyPidConfig();
     resetStatus();
@@ -243,6 +433,214 @@ namespace {
     segments[index].a.y = ay;
     segments[index].b.x = bx;
     segments[index].b.y = by;
+  }
+
+  void resetStraightLock() {
+    straightLockSegmentIndex = -1;
+    straightLockStartLeftCm = 0.0f;
+    straightLockStartRightCm = 0.0f;
+  }
+
+  int baseStraightPwm() {
+    float avgCoef = (fabs(cfg.coefLeftCmsPerPwm) + fabs(cfg.coefRightCmsPerPwm)) * 0.5f;
+    if (avgCoef < 0.001f) {
+      return cfg.minPwm;
+    }
+
+    int pwm = (int)round(cfg.penSpeedCms / avgCoef);
+    if (pwm < cfg.minPwm) pwm = cfg.minPwm;
+    if (pwm > 255) pwm = 255;
+    return pwm;
+  }
+
+  float estimateStraightStopDistanceCm() {
+    float distance = cfg.straightStopCompensationCm;
+    float speed = fabs((odometryState.speedLeftCms + odometryState.speedRightCms) * 0.5f);
+
+    if (cfg.straightStopDecelCms2 > 0.01f) {
+      distance += (speed * speed) / (2.0f * cfg.straightStopDecelCms2);
+    }
+
+    return clampFloat(distance, 0.0f, straightTargetCm * 0.5f);
+  }
+
+  void finishStraightLine(unsigned long now, float progress, float balanceError, float stopDistance) {
+    running = false;
+    finished = true;
+    straightLineMode = false;
+
+    lastPwmLeft = 0;
+    lastPwmRight = 0;
+
+    status.running = running;
+    status.finished = finished;
+    status.currentSegment = 1;
+    status.segmentCount = 1;
+    status.phaseName = "STRAIGHT_DONE";
+    status.progressCm = progress;
+    status.segmentLengthCm = straightTargetCm;
+    status.encoderBalanceErrorCm = balanceError;
+    status.straightStopDistanceCm = stopDistance;
+    status.vCenterCms = 0.0f;
+    status.omegaRadS = 0.0f;
+    status.vLeftCms = 0.0f;
+    status.vRightCms = 0.0f;
+    status.pwmLeft = 0;
+    status.pwmRight = 0;
+    status.targetPwmLeft = 0;
+    status.targetPwmRight = 0;
+
+    motorState.pwmLeft = 0;
+    motorState.pwmRight = 0;
+
+    if (cfg.straightBrakeMs > 0) {
+      straightBrakeActive = true;
+      straightBrakeEndMs = now + (unsigned long)cfg.straightBrakeMs;
+      motorState.mode = "PEN_BRAKE";
+      brakeMotors();
+    } else {
+      straightBrakeActive = false;
+      motorState.mode = "PEN_INVERSE";
+      stopMotors();
+    }
+
+    Logger::log("Ligne droite terminee. Progress=" + String(progress, 3) +
+                " cm stopEst=" + String(stopDistance, 3) +
+                " cm erreur encodeurs L-R=" + String(balanceError, 3) + " cm");
+  }
+
+  void updateStraightLine(unsigned long now, float dt) {
+    (void)dt;
+
+    float currentLeft = getLeftDistanceCm();
+    float currentRight = getRightDistanceCm();
+
+    float leftTravel = (currentLeft - straightStartLeftCm) * straightDirection;
+    float rightTravel = (currentRight - straightStartRightCm) * straightDirection;
+    float progress = (leftTravel + rightTravel) * 0.5f;
+    float balanceError = leftTravel - rightTravel;
+    float remaining = straightTargetCm - progress;
+    float stopDistance = estimateStraightStopDistanceCm();
+    float stopThreshold = fmax(cfg.segmentToleranceCm, stopDistance);
+
+    if (remaining <= stopThreshold) {
+      finishStraightLine(now, progress, balanceError, stopDistance);
+      return;
+    }
+
+    int basePwm = baseStraightPwm();
+    int correction = (int)round(fabs(balanceError) * cfg.straightEncoderKp);
+    correction = constrain(correction, 0, 255 - basePwm);
+
+    int pwmLeft = basePwm;
+    int pwmRight = basePwm;
+
+    if (balanceError > 0.0f) {
+      pwmRight += correction;
+    } else if (balanceError < 0.0f) {
+      pwmLeft += correction;
+    }
+
+    pwmLeft *= straightDirection;
+    pwmRight *= straightDirection;
+
+    pwmLeft = applyContinuousSlew(lastPwmLeft, pwmLeft);
+    pwmRight = applyContinuousSlew(lastPwmRight, pwmRight);
+
+    lastPwmLeft = pwmLeft;
+    lastPwmRight = pwmRight;
+
+    setMotorPwmTracked(pwmLeft, pwmRight);
+
+    status.running = running;
+    status.finished = finished;
+    status.currentSegment = 0;
+    status.segmentCount = 1;
+    status.phaseName = "STRAIGHT_ENCODERS";
+    status.penX = odometryState.penXCm;
+    status.penY = odometryState.penYCm;
+    status.lateralErrorCm = 0.0f;
+    status.progressCm = progress;
+    status.segmentLengthCm = straightTargetCm;
+    status.encoderBalanceErrorCm = balanceError;
+    status.straightStopDistanceCm = stopDistance;
+    status.vCenterCms = (odometryState.speedLeftCms + odometryState.speedRightCms) * 0.5f;
+    status.omegaRadS = (odometryState.speedRightCms - odometryState.speedLeftCms) / cfg.wheelBaseCm;
+    status.vLeftCms = odometryState.speedLeftCms;
+    status.vRightCms = odometryState.speedRightCms;
+    status.pwmLeft = pwmLeft;
+    status.pwmRight = pwmRight;
+    status.targetPwmLeft = pwmLeft;
+    status.targetPwmRight = pwmRight;
+  }
+
+  void updateStraightLockSegment(int currentSegment,
+                                 float progress,
+                                 float length,
+                                 float lateralError,
+                                 float penX,
+                                 float penY,
+                                 float targetX,
+                                 float targetY) {
+    if (straightLockSegmentIndex != currentSegment) {
+      straightLockSegmentIndex = currentSegment;
+      straightLockStartLeftCm = getLeftDistanceCm();
+      straightLockStartRightCm = getRightDistanceCm();
+      pulseAccumulatorLeft = 0.0f;
+      pulseAccumulatorRight = 0.0f;
+    }
+
+    float leftTravel = getLeftDistanceCm() - straightLockStartLeftCm;
+    float rightTravel = getRightDistanceCm() - straightLockStartRightCm;
+    float balanceError = leftTravel - rightTravel;
+
+    int basePwm = baseStraightPwm();
+    int correction = (int)round(fabs(balanceError) * cfg.straightEncoderKp);
+    correction = constrain(correction, 0, 255 - basePwm);
+
+    int pwmLeft = basePwm;
+    int pwmRight = basePwm;
+
+    if (balanceError > 0.0f) {
+      pwmRight += correction;
+    } else if (balanceError < 0.0f) {
+      pwmLeft += correction;
+    }
+
+    pwmLeft = applyContinuousSlew(lastPwmLeft, pwmLeft);
+    pwmRight = applyContinuousSlew(lastPwmRight, pwmRight);
+
+    lastPwmLeft = pwmLeft;
+    lastPwmRight = pwmRight;
+
+    setMotorPwmTracked(pwmLeft, pwmRight);
+
+    status.running = running;
+    status.finished = finished;
+    status.currentSegment = currentSegment;
+    status.segmentCount = segmentCount;
+    status.phaseName = "STRAIGHT_SEGMENT";
+    status.cornerActive = false;
+    status.remainingToCornerCm = 0.0f;
+    status.cornerAngleErrorDeg = 0.0f;
+
+    status.penX = penX;
+    status.penY = penY;
+    status.targetX = targetX;
+    status.targetY = targetY;
+    status.lateralErrorCm = lateralError;
+    status.progressCm = progress;
+    status.segmentLengthCm = length;
+    status.encoderBalanceErrorCm = balanceError;
+
+    status.vCenterCms = (odometryState.speedLeftCms + odometryState.speedRightCms) * 0.5f;
+    status.omegaRadS = (odometryState.speedRightCms - odometryState.speedLeftCms) / cfg.wheelBaseCm;
+    status.vLeftCms = odometryState.speedLeftCms;
+    status.vRightCms = odometryState.speedRightCms;
+    status.pwmLeft = pwmLeft;
+    status.pwmRight = pwmRight;
+    status.targetPwmLeft = pwmLeft;
+    status.targetPwmRight = pwmRight;
   }
 }
 
@@ -274,11 +672,20 @@ namespace PenInverseFollower {
     if (cfg.maxOmegaRadS < 0.1f) cfg.maxOmegaRadS = 0.1f;
     if (cfg.maxNormalCorrectionCms < 0.0f) cfg.maxNormalCorrectionCms = 0.0f;
     if (cfg.minCommandSpeedCms < 0.0f) cfg.minCommandSpeedCms = 0.0f;
+    if (cfg.cornerInnerBoost < 0.0f) cfg.cornerInnerBoost = 0.0f;
+    if (cfg.cornerInnerBoost > 1.0f) cfg.cornerInnerBoost = 1.0f;
+    if (cfg.cornerTurnMinPwm < cfg.minPwm) cfg.cornerTurnMinPwm = cfg.minPwm;
+    if (cfg.cornerTurnMinPwm > 255) cfg.cornerTurnMinPwm = 255;
     if (cfg.cornerMaxDurationS < 0.1f) cfg.cornerMaxDurationS = 0.1f;
     if (cfg.minPwm < 0) cfg.minPwm = 0;
     if (cfg.minPwm > 255) cfg.minPwm = 255;
     if (cfg.pwmSlewStep < 1) cfg.pwmSlewStep = 1;
     if (cfg.pwmSlewStep > 255) cfg.pwmSlewStep = 255;
+    if (cfg.straightEncoderKp < 0.0f) cfg.straightEncoderKp = 0.0f;
+    if (cfg.straightStopCompensationCm < 0.0f) cfg.straightStopCompensationCm = 0.0f;
+    if (cfg.straightStopDecelCms2 < 0.0f) cfg.straightStopDecelCms2 = 0.0f;
+    if (cfg.straightBrakeMs < 0) cfg.straightBrakeMs = 0;
+    if (cfg.straightBrakeMs > 500) cfg.straightBrakeMs = 500;
     if (cfg.segmentToleranceCm < 0.01f) cfg.segmentToleranceCm = 0.01f;
 
     Odometry::setGeometry(cfg.wheelBaseCm, cfg.penOffsetCm);
@@ -324,6 +731,8 @@ namespace PenInverseFollower {
       cfg.cornerSpeedCms = prefs.getFloat("cornerSp", cfg.cornerSpeedCms);
       cfg.cornerOmegaRadS = prefs.getFloat("cornerOm", cfg.cornerOmegaRadS);
       cfg.cornerExitAngleDeg = prefs.getFloat("cornerEx", cfg.cornerExitAngleDeg);
+      cfg.cornerInnerBoost = prefs.getFloat("cornerBoost", cfg.cornerInnerBoost);
+      cfg.cornerTurnMinPwm = prefs.getInt("cornerTurnPwm", cfg.cornerTurnMinPwm);
       cfg.cornerMaxDurationS = prefs.getFloat("cornerDur", cfg.cornerMaxDurationS);
 
       cfg.kp = prefs.getFloat("kp", cfg.kp);
@@ -337,6 +746,10 @@ namespace PenInverseFollower {
       cfg.minPwm = prefs.getInt("minPwm", cfg.minPwm);
       cfg.pwmSlewStep = prefs.getInt("slew", cfg.pwmSlewStep);
       cfg.pwmDither = prefs.getBool("dither", cfg.pwmDither);
+      cfg.straightEncoderKp = prefs.getFloat("strKp", cfg.straightEncoderKp);
+      cfg.straightStopCompensationCm = prefs.getFloat("strStop", cfg.straightStopCompensationCm);
+      cfg.straightStopDecelCms2 = prefs.getFloat("strDecel", cfg.straightStopDecelCms2);
+      cfg.straightBrakeMs = prefs.getInt("strBrake", cfg.straightBrakeMs);
 
       cfg.allowReverse = prefs.getBool("reverse", cfg.allowReverse);
       cfg.minForwardSpeedCms = prefs.getFloat("minFwd", cfg.minForwardSpeedCms);
@@ -383,6 +796,8 @@ namespace PenInverseFollower {
     prefs.putFloat("cornerSp", cfg.cornerSpeedCms);
     prefs.putFloat("cornerOm", cfg.cornerOmegaRadS);
     prefs.putFloat("cornerEx", cfg.cornerExitAngleDeg);
+    prefs.putFloat("cornerBoost", cfg.cornerInnerBoost);
+    prefs.putInt("cornerTurnPwm", cfg.cornerTurnMinPwm);
     prefs.putFloat("cornerDur", cfg.cornerMaxDurationS);
 
     prefs.putFloat("kp", cfg.kp);
@@ -396,6 +811,10 @@ namespace PenInverseFollower {
     prefs.putInt("minPwm", cfg.minPwm);
     prefs.putInt("slew", cfg.pwmSlewStep);
     prefs.putBool("dither", cfg.pwmDither);
+    prefs.putFloat("strKp", cfg.straightEncoderKp);
+    prefs.putFloat("strStop", cfg.straightStopCompensationCm);
+    prefs.putFloat("strDecel", cfg.straightStopDecelCms2);
+    prefs.putInt("strBrake", cfg.straightBrakeMs);
 
     prefs.putBool("reverse", cfg.allowReverse);
     prefs.putFloat("minFwd", cfg.minForwardSpeedCms);
@@ -422,6 +841,14 @@ namespace PenInverseFollower {
 
     Odometry::resetPose(-cfg.penOffsetCm, 0.0f, 0.0f);
     startSegments(1);
+
+    straightLineMode = true;
+    straightDirection = (d >= 0.0f) ? 1 : -1;
+    straightTargetCm = fabs(d);
+    straightStartLeftCm = getLeftDistanceCm();
+    straightStartRightCm = getRightDistanceCm();
+    status.phaseName = "STRAIGHT_ENCODERS";
+    status.straightStopDistanceCm = 0.0f;
 
     Logger::log("Test ligne stylo : distance=" + String(distanceCm, 1) +
                 " cm scale=" + String(cfg.distanceScale, 3));
@@ -532,7 +959,14 @@ namespace PenInverseFollower {
   }
 
   void update(unsigned long now, float dt) {
-    (void)now;
+    if (straightBrakeActive) {
+      if ((long)(now - straightBrakeEndMs) >= 0) {
+        straightBrakeActive = false;
+        stopMotors();
+        motorState.mode = "IDLE";
+      }
+      return;
+    }
 
     if (!running || finished) {
       return;
@@ -540,6 +974,11 @@ namespace PenInverseFollower {
 
     if (dt <= 0.0f) {
       dt = 0.02f;
+    }
+
+    if (straightLineMode) {
+      updateStraightLine(now, dt);
+      return;
     }
 
     if (segmentIndex >= segmentCount) {
@@ -591,9 +1030,57 @@ namespace PenInverseFollower {
       status.maxLateralErrorCm = fabs(lateralError);
     }
 
-    if (progress >= length - cfg.segmentToleranceCm) {
+    bool hasNextSegment = (segmentIndex + 1) < segmentCount;
+    bool hasPreviousSegment = segmentIndex > 0;
+    float remainingToCorner = length - progress;
+    float cornerAngleErrorDeg = 0.0f;
+    float speedBasedCornerApproachCm = fmin(4.0f, fabs(cfg.penSpeedCms) * 0.22f);
+    float dtBasedCornerApproachCm = fmin(4.0f, fabs(cfg.penSpeedCms) * dt * 2.5f);
+    float cornerTriggerCm = fmax(cfg.cornerApproachCm,
+                                 fmax(speedBasedCornerApproachCm, dtBasedCornerApproachCm));
+    float leavingCornerDistanceCm = fmax(cornerTriggerCm * 2.0f,
+                                         fmin(cfg.lookaheadCm, 4.0f));
+    bool approachingCorner = cfg.cornerMode && hasNextSegment &&
+                             remainingToCorner <= cornerTriggerCm;
+    bool leavingCorner = false;
+
+    bool nearCornerCandidate = cfg.cornerMode &&
+                               (approachingCorner ||
+                                (hasPreviousSegment && progress <= leavingCornerDistanceCm));
+
+    if (nearCornerCandidate) {
+      float desiredHeading = atan2(uy, ux);
+
+      if (approachingCorner) {
+        Segment next = segments[segmentIndex + 1];
+        float ndx = next.b.x - next.a.x;
+        float ndy = next.b.y - next.a.y;
+        if (sqrt(ndx * ndx + ndy * ndy) > 0.001f) {
+          desiredHeading = atan2(ndy, ndx);
+        }
+      }
+
+      cornerAngleErrorDeg = radToDeg(normalizeRad(desiredHeading - odometryState.thetaRad));
+
+      if (hasPreviousSegment &&
+          progress <= leavingCornerDistanceCm &&
+          fabs(cornerAngleErrorDeg) > cfg.cornerExitAngleDeg) {
+        leavingCorner = true;
+      }
+    }
+
+    bool cornerActive = approachingCorner || leavingCorner;
+    float endTolerance = cfg.segmentToleranceCm;
+    if (cfg.cornerMode && hasNextSegment) {
+      endTolerance = fmin(endTolerance, 0.05f);
+    }
+
+    if (progress >= length - endTolerance) {
       segmentIndex++;
       resetPid(pidLine);
+      pulseAccumulatorLeft = 0.0f;
+      pulseAccumulatorRight = 0.0f;
+      resetStraightLock();
 
       if (segmentIndex >= segmentCount) {
         running = false;
@@ -619,10 +1106,27 @@ namespace PenInverseFollower {
       return;
     }
 
-    float lookProgress = clampFloat(progress + cfg.lookaheadCm, 0.0f, length);
+    float effectiveLookahead = cfg.lookaheadCm;
+
+    if (cornerActive) {
+      if (approachingCorner) {
+        effectiveLookahead = fmin(effectiveLookahead, fmax(0.0f, remainingToCorner));
+      }
+
+      if (leavingCorner) {
+        float cornerLookahead = fmax(0.25f, progress * 0.75f);
+        effectiveLookahead = fmin(effectiveLookahead, cornerLookahead);
+      }
+    }
+
+    float lookProgress = clampFloat(progress + effectiveLookahead, 0.0f, length);
 
     float targetX = s.a.x + lookProgress * ux;
     float targetY = s.a.y + lookProgress * uy;
+
+    if (cornerActive) {
+      resetStraightLock();
+    }
 
     float errorX = targetX - penX;
     float errorY = targetY - penY;
@@ -636,11 +1140,16 @@ namespace PenInverseFollower {
       status.normalCorrectionLimited = true;
     }
 
-    float vPenX = cfg.penSpeedCms * ux
+    float pathSpeed = cfg.penSpeedCms;
+    if (cornerActive && cfg.cornerSpeedCms > 0.0f && cfg.cornerSpeedCms < pathSpeed) {
+      pathSpeed = cfg.cornerSpeedCms;
+    }
+
+    float vPenX = pathSpeed * ux
                 + cfg.targetGain * errorX
                 - normalCorrection * nx;
 
-    float vPenY = cfg.penSpeedCms * uy
+    float vPenY = pathSpeed * uy
                 + cfg.targetGain * errorY
                 - normalCorrection * ny;
 
@@ -668,8 +1177,9 @@ namespace PenInverseFollower {
       status.reverseLimited = true;
     }
 
-    if (cfg.maxOmegaRadS > 0.0f && fabs(omega) > cfg.maxOmegaRadS) {
-      omega = (omega > 0.0f) ? cfg.maxOmegaRadS : -cfg.maxOmegaRadS;
+    float omegaLimit = cornerActive ? cfg.cornerOmegaRadS : cfg.maxOmegaRadS;
+    if (omegaLimit > 0.0f && fabs(omega) > omegaLimit) {
+      omega = (omega > 0.0f) ? omegaLimit : -omegaLimit;
       status.omegaLimited = true;
     }
 
@@ -682,25 +1192,49 @@ namespace PenInverseFollower {
     if (fabs(vLeftDesired) < cfg.minCommandSpeedCms) vLeftDesired = 0.0f;
     if (fabs(vRightDesired) < cfg.minCommandSpeedCms) vRightDesired = 0.0f;
 
-    int pwmLeftRaw = leftSpeedToRawPwm(vLeftDesired);
-    int pwmRightRaw = rightSpeedToRawPwm(vRightDesired);
+    int pwmLeftTarget = 0;
+    int pwmRightTarget = 0;
 
-    int pwmLeftTarget = ditherPwmCommand(pwmLeftRaw, ditherAccumulatorLeft);
-    int pwmRightTarget = ditherPwmCommand(pwmRightRaw, ditherAccumulatorRight);
+    int rawLeftPwm = leftSpeedToRawPwm(vLeftDesired);
+    int rawRightPwm = rightSpeedToRawPwm(vRightDesired);
+    bool rawOppositeWheelTurn = (rawLeftPwm < 0 && rawRightPwm > 0) ||
+                                (rawLeftPwm > 0 && rawRightPwm < 0);
+    bool precisionCorner = segmentCount > 1 &&
+                           (cornerActive || rawOppositeWheelTurn) &&
+                           (isPulseRange(rawLeftPwm) || isPulseRange(rawRightPwm));
 
-    int pwmLeft = pwmLeftTarget;
-    int pwmRight = pwmRightTarget;
-
-    // Si on est en micro-impulsions, on ne rampe pas vers minPwm :
-    // il faut vraiment envoyer une impulsion suffisante pour vaincre les frottements.
-    // Pour les commandes au-dessus de minPwm, on garde la rampe classique.
-    if (!isSmallDitherCommand(pwmLeftRaw)) {
-      pwmLeft = applySlew(lastPwmLeft, pwmLeftTarget);
+    if (precisionCorner) {
+      pwmLeftTarget = pulsePwmCommand(rawLeftPwm, pulseAccumulatorLeft);
+      pwmRightTarget = pulsePwmCommand(rawRightPwm, pulseAccumulatorRight);
+    } else {
+      pulseAccumulatorLeft = 0.0f;
+      pulseAccumulatorRight = 0.0f;
+      scaledWheelPwmCommands(vLeftDesired, vRightDesired, pwmLeftTarget, pwmRightTarget);
     }
 
-    if (!isSmallDitherCommand(pwmRightRaw)) {
-      pwmRight = applySlew(lastPwmRight, pwmRightTarget);
+    bool oppositeWheelTurn = (pwmLeftTarget < 0 && pwmRightTarget > 0) ||
+                             (pwmLeftTarget > 0 && pwmRightTarget < 0);
+    bool turnAssistActive = !precisionCorner &&
+                            (cornerActive || (segmentCount > 1 && oppositeWheelTurn)) &&
+                            cfg.cornerInnerBoost > 0.0f;
+
+    if (turnAssistActive) {
+      boostInnerWheelPwmInCorner(vLeftDesired, vRightDesired, pwmLeftTarget, pwmRightTarget);
     }
+
+    if (!precisionCorner && segmentCount > 1 && oppositeWheelTurn && cfg.cornerTurnMinPwm > cfg.minPwm) {
+      applyCornerTurnMinimum(pwmLeftTarget, pwmRightTarget);
+    }
+
+    bool leftSignFlip = segmentCount > 1 && lastPwmLeft != 0 && pwmLeftTarget != 0 &&
+                        ((lastPwmLeft > 0 && pwmLeftTarget < 0) ||
+                         (lastPwmLeft < 0 && pwmLeftTarget > 0));
+    bool rightSignFlip = segmentCount > 1 && lastPwmRight != 0 && pwmRightTarget != 0 &&
+                         ((lastPwmRight > 0 && pwmRightTarget < 0) ||
+                          (lastPwmRight < 0 && pwmRightTarget > 0));
+
+    int pwmLeft = applyContinuousSlew(lastPwmLeft, pwmLeftTarget, leftSignFlip);
+    int pwmRight = applyContinuousSlew(lastPwmRight, pwmRightTarget, rightSignFlip);
 
     lastPwmLeft = pwmLeft;
     lastPwmRight = pwmRight;
@@ -714,8 +1248,10 @@ namespace PenInverseFollower {
     status.finished = finished;
     status.currentSegment = segmentIndex;
     status.segmentCount = segmentCount;
-    status.phaseName = "FOLLOW_SEGMENT";
-    status.cornerActive = false;
+    status.phaseName = precisionCorner ? "CORNER_PRECISION" : (cornerActive ? "CORNER" : "FOLLOW_SEGMENT");
+    status.cornerActive = cornerActive;
+    status.remainingToCornerCm = fmax(0.0f, remainingToCorner);
+    status.cornerAngleErrorDeg = cornerAngleErrorDeg;
 
     status.penX = penX;
     status.penY = penY;
@@ -740,6 +1276,15 @@ namespace PenInverseFollower {
     status.pwmRight = pwmRight;
     status.targetPwmLeft = pwmLeftTarget;
     status.targetPwmRight = pwmRightTarget;
+
+    printPwmTrace(now,
+                  pwmLeftTarget,
+                  pwmRightTarget,
+                  pwmLeft,
+                  pwmRight,
+                  vLeftDesired,
+                  vRightDesired,
+                  remainingToCorner);
   }
 
   bool isRunning() {

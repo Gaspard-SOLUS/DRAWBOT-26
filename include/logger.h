@@ -4,5 +4,6 @@
 namespace Logger {
   void begin();
   void log(const String& message);
+  void trace(const String& message);
   String getBuffer();
 }

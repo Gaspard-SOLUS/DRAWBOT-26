@@ -121,16 +121,15 @@ String html() {
   <input id="minPwm" type="number" value="180" step="1">
 
   <label>Rampe PWM</label>
-  <input id="pwmSlewStep" type="number" value="6" step="1">
+  <input id="pwmSlewStep" type="number" value="20" step="1">
 
   <label>Micro-impulsions PWM</label>
   <select id="pwmDither">
-    <option value="1">Oui - conseillé pour petit cercle</option>
-    <option value="0">Non</option>
+    <option value="0">Non - commandes continues</option>
   </select>
 
   <p>
-    Si le PWM minimum est élevé, les micro-impulsions évitent que chaque petite correction devienne une grosse marche avant/arrière.
+    Les micro-impulsions sont désactivées : une commande moteur vaut 0 ou au moins le PWM minimum.
   </p>
 
   <label>Tolérance segment — cm</label>

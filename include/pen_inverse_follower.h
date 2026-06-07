@@ -20,24 +20,24 @@ namespace PenInverseFollower {
 
     // Correction globale des distances demandées.
     // Exemple : demandé 20 cm, réel 16 cm => distanceScale = 20 / 16 = 1.25.
-    float distanceScale = 1.0f;
+    float distanceScale = 0.93f;
 
     // Suivi de trajectoire du stylo.
-    float penSpeedCms = 0.7f;
+    float penSpeedCms = 13.0f;
     float lineGain = 0.45f;
     float targetGain = 0.8f;
     float lookaheadCm = 0.35f;
 
     // Saturations physiques.
-    float penSpeedMaxCms = 1.8f;
-    float wheelSpeedMaxCms = 4.0f;
+    float penSpeedMaxCms = 18.0f;
+    float wheelSpeedMaxCms = 18.0f;
 
     // Compatibilité avec la page escalier : limitation de rotation et de correction.
     float maxOmegaRadS = 4.0f;
     float maxNormalCorrectionCms = 2.5f;
 
-    // Petit cercle : le recul doit généralement être autorisé.
-    bool allowReverse = true;
+    // Le centre du robot ne doit pas reculer pendant l'escalier.
+    bool allowReverse = false;
     float minForwardSpeedCms = 0.0f;
 
     // PID sur l'erreur latérale du stylo.
@@ -56,22 +56,29 @@ namespace PenInverseFollower {
     float minCommandSpeedCms = 0.0f;
 
     // Rampe PWM : variation maximale de PWM à chaque update.
-    int pwmSlewStep = 6;
+    int pwmSlewStep = 20;
 
-    // Petit cercle : autorise des micro-déplacements avec un PWM minimum élevé.
-    // Au lieu de transformer toute petite demande en PWM=180 permanent,
-    // le code envoie des impulsions courtes à minPwm pour obtenir une vitesse moyenne plus faible.
-    bool pwmDither = true;
+    // Ancienne option conservée pour compatibilité API.
+    // Les commandes moteur sont maintenant continues : 0 ou au moins minPwm.
+    bool pwmDither = false;
+
+    float straightEncoderKp = 22.0f;
+    float straightStopCompensationCm = 0.0f;
+    float straightStopDecelCms2 = 0.0f;
+    int straightBrakeMs = 80;
 
     float segmentToleranceCm = 0.08f;
 
     // Champs conservés pour compatibilité avec l'API/page escalier.
     // Le mode cercle réel utilise surtout startTrajectory(...).
-    bool cornerMode = false;
-    float cornerApproachCm = 2.5f;
-    float cornerSpeedCms = 0.35f;
+    bool cornerMode = true;
+    float cornerApproachCm = 1.2f;
+    float cornerSpeedCms = 8.0f;
     float cornerOmegaRadS = 4.0f;
-    float cornerExitAngleDeg = 12.0f;
+    float cornerExitAngleDeg = 5.0f;
+    // 0 = suivi inverse pur du stylo. A n'augmenter qu'en dernier recours.
+    float cornerInnerBoost = 0.0f;
+    int cornerTurnMinPwm = 180;
     float cornerMaxDurationS = 1.80f;
   };
 
@@ -113,6 +120,9 @@ namespace PenInverseFollower {
 
     int targetPwmLeft = 0;
     int targetPwmRight = 0;
+
+    float encoderBalanceErrorCm = 0.0f;
+    float straightStopDistanceCm = 0.0f;
 
     bool reverseLimited = false;
     bool omegaLimited = false;

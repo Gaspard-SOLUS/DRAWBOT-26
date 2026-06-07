@@ -122,6 +122,10 @@ static void applyPenInverseConfigFromRequest() {
   if (server.hasArg("minPwm")) cfg.minPwm = server.arg("minPwm").toInt();
   if (server.hasArg("minCommandSpeed")) cfg.minCommandSpeedCms = server.arg("minCommandSpeed").toFloat();
   if (server.hasArg("pwmSlewStep")) cfg.pwmSlewStep = server.arg("pwmSlewStep").toInt();
+  if (server.hasArg("straightEncoderKp")) cfg.straightEncoderKp = server.arg("straightEncoderKp").toFloat();
+  if (server.hasArg("straightStopCompensation")) cfg.straightStopCompensationCm = server.arg("straightStopCompensation").toFloat();
+  if (server.hasArg("straightStopDecel")) cfg.straightStopDecelCms2 = server.arg("straightStopDecel").toFloat();
+  if (server.hasArg("straightBrakeMs")) cfg.straightBrakeMs = server.arg("straightBrakeMs").toInt();
   if (server.hasArg("pwmDither")) cfg.pwmDither = (server.arg("pwmDither").toInt() != 0);
   if (server.hasArg("allowReverse")) cfg.allowReverse = (server.arg("allowReverse").toInt() != 0);
   if (server.hasArg("minForwardSpeed")) cfg.minForwardSpeedCms = server.arg("minForwardSpeed").toFloat();
@@ -133,6 +137,8 @@ static void applyPenInverseConfigFromRequest() {
   if (server.hasArg("cornerSpeed")) cfg.cornerSpeedCms = server.arg("cornerSpeed").toFloat();
   if (server.hasArg("cornerOmega")) cfg.cornerOmegaRadS = server.arg("cornerOmega").toFloat();
   if (server.hasArg("cornerExitAngle")) cfg.cornerExitAngleDeg = server.arg("cornerExitAngle").toFloat();
+  if (server.hasArg("cornerInnerBoost")) cfg.cornerInnerBoost = server.arg("cornerInnerBoost").toFloat();
+  if (server.hasArg("cornerTurnMinPwm")) cfg.cornerTurnMinPwm = server.arg("cornerTurnMinPwm").toInt();
   if (server.hasArg("cornerMaxDuration")) cfg.cornerMaxDurationS = server.arg("cornerMaxDuration").toFloat();
 
   PenInverseFollower::setConfig(cfg);
@@ -164,12 +170,26 @@ static String penInverseConfigJson() {
   json += "\"coefR\":" + String(cfg.coefRightCmsPerPwm, 5) + ",";
 
   json += "\"minPwm\":" + String(cfg.minPwm) + ",";
+  json += "\"minCommandSpeed\":" + String(cfg.minCommandSpeedCms, 3) + ",";
   json += "\"pwmSlewStep\":" + String(cfg.pwmSlewStep) + ",";
+  json += "\"straightEncoderKp\":" + String(cfg.straightEncoderKp, 3) + ",";
+  json += "\"straightStopCompensation\":" + String(cfg.straightStopCompensationCm, 3) + ",";
+  json += "\"straightStopDecel\":" + String(cfg.straightStopDecelCms2, 3) + ",";
+  json += "\"straightBrakeMs\":" + String(cfg.straightBrakeMs) + ",";
   json += "\"pwmDither\":" + String(cfg.pwmDither ? "true" : "false") + ",";
   json += "\"allowReverse\":" + String(cfg.allowReverse ? "true" : "false") + ",";
   json += "\"minForwardSpeed\":" + String(cfg.minForwardSpeedCms, 3) + ",";
 
-  json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3);
+  json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3) + ",";
+
+  json += "\"cornerMode\":" + String(cfg.cornerMode ? "true" : "false") + ",";
+  json += "\"cornerApproach\":" + String(cfg.cornerApproachCm, 3) + ",";
+  json += "\"cornerSpeed\":" + String(cfg.cornerSpeedCms, 3) + ",";
+  json += "\"cornerOmega\":" + String(cfg.cornerOmegaRadS, 3) + ",";
+  json += "\"cornerExitAngle\":" + String(cfg.cornerExitAngleDeg, 3) + ",";
+  json += "\"cornerInnerBoost\":" + String(cfg.cornerInnerBoost, 3) + ",";
+  json += "\"cornerTurnMinPwm\":" + String(cfg.cornerTurnMinPwm) + ",";
+  json += "\"cornerMaxDuration\":" + String(cfg.cornerMaxDurationS, 3);
 
   json += "}";
 
@@ -289,6 +309,8 @@ static void handleStatus() {
   json += "\"followerMaxLateralError\":" + String(pf.maxLateralErrorCm, 3) + ",";
   json += "\"followerProgress\":" + String(pf.progressCm, 3) + ",";
   json += "\"followerSegmentLength\":" + String(pf.segmentLengthCm, 3) + ",";
+  json += "\"followerEncoderBalanceError\":" + String(pf.encoderBalanceErrorCm, 3) + ",";
+  json += "\"followerStraightStopDistance\":" + String(pf.straightStopDistanceCm, 3) + ",";
 
   json += "\"followerVPenX\":" + String(pf.vPenX, 3) + ",";
   json += "\"followerVPenY\":" + String(pf.vPenY, 3) + ",";
