@@ -9,4 +9,5 @@ namespace WebPages {
   String soutenance2Escalier();
   String soutenance2Cercle();
   String soutenance2RoseDesVents();
+  String tests();
 }

@@ -406,7 +406,7 @@ refreshLogs();
           depuis l'interface web.
         </p>
         <p>
-          Rayon demandé entre 14 cm et 20 cm pour le mode cercle continu.
+          Rayon demandé entre 2 cm et 20 cm.
         </p>
         <a href="/soutenance2/cercle">
           <button class="btn-green">Ouvrir la page cercle</button>
@@ -634,151 +634,50 @@ refreshLogs();
   <main>
     <h1>Soutenance 2 - Séquence 2 : cercle</h1>
     <p class="subtitle">
-      Mode continu pour rayons 14 à 20 cm : calcul géométrique + PID vitesse sur les deux roues.
+      Réglage du rayon et lancement du tracé du cercle.
     </p>
 
-    <p><a href="/soutenance2">← Retour soutenance 2</a></p>
+    <p>
+      <a href="/soutenance2">← Retour soutenance 2</a>
+    </p>
 
     <div class="grid">
       <section class="card">
-        <h2>1. Géométrie</h2>
-        <label>Rayon demandé du cercle stylo en cm</label>
-        <input id="radiusCm" type="number" min="14" max="20" step="0.1" value="16">
+        <h2>Paramètres cercle</h2>
 
-        <label>Échelle du rayon</label>
-        <input id="radiusScale" type="number" min="0.5" max="1.8" step="0.001" value="1.000">
+        <label>Rayon demandé en cm</label>
+        <input id="circleRadius" type="number" value="10" min="2" max="20" step="0.1"><br>
 
-        <label>Offset de correction du rayon en cm</label>
-        <input id="radiusOffsetCm" type="number" min="-8" max="8" step="0.1" value="0.0">
+        <label>Nombre de segments si approximation polygonale</label>
+        <input id="circleSegments" type="number" value="36" min="12" max="96" step="1"><br>
 
-        <label>Écartement des roues en cm</label>
-        <input id="wheelBaseCm" type="number" min="5" max="15" step="0.1" value="8.3">
+        <label>PWM de base</label>
+        <input id="circlePwm" type="number" value="170" min="80" max="255" step="1">
 
-        <label>Offset stylo : axe roues → stylo en cm</label>
-        <input id="penOffsetCm" type="number" min="5" max="20" step="0.1" value="13">
-
-        <label>Sens du cercle</label>
-        <select id="direction">
-          <option value="1">Gauche</option>
-          <option value="0">Droite</option>
-        </select>
+        <br><br>
+        <button class="btn-green" onclick="startCircle()">Lancer cercle</button>
+        <button class="btn-red" onclick="api('/api/stop')">STOP</button><br>
+        <button class="btn-blue" onclick="api('/api/reset-encoders')">RESET odométrie</button>
       </section>
 
       <section class="card">
-        <h2>2. Vitesse et fermeture</h2>
-        <label>Vitesse roue extérieure en cm/s</label>
-        <input id="outerWheelSpeedCms" type="number" min="1" max="20" step="0.1" value="7">
-
-        <label>Facteur distance roues / fermeture</label>
-        <input id="closureFactor" type="number" min="0.7" max="1.3" step="0.01" value="1.00">
-        <p class="hint">1.00 = distance theorique des roues. A ajuster legerement seulement apres calibration.</p>
-
-        <label>Facteur d'arrêt angulaire</label>
-        <input id="stopTurnFactor" type="number" min="0.90" max="1.05" step="0.001" value="1.000">
-        <p class="hint">1.000 = arrêt à 360°. Mettre 0.990 si le robot repasse un peu sur le début.</p>
-
-        <label>Ralentissement final activé ?</label>
-        <select id="endSlowdownEnabled">
-          <option value="0">Non</option>
-          <option value="1">Oui</option>
-        </select>
-
-        <label>Début ralentissement final</label>
-        <input id="endSlowdownStart" type="number" min="0.50" max="0.98" step="0.01" value="0.90">
-
-        <label>Vitesse mini ralentissement final</label>
-        <input id="endSlowdownMinScale" type="number" min="0.40" max="1.00" step="0.01" value="0.75">
-
-        <label>PWM minimum</label>
-        <input id="minPwm" type="number" min="0" max="255" step="1" value="170">
-
-        <label>PWM maximum</label>
-        <input id="maxPwm" type="number" min="0" max="255" step="1" value="250">
-
-        <label>Rampe PWM par cycle</label>
-        <input id="pwmRampStep" type="number" min="1" max="255" step="1" value="8">
+        <h2>Informations géométriques</h2>
+        <p>
+          Le stylo est décalé par rapport à l'axe des roues. La stratégie dépend
+          donc du rayon demandé.
+        </p>
+        <div class="value"><span>Rayon minimum continu</span><span>≈ 13 cm</span></div>
+        <div class="value"><span>Écartement roues</span><span>8.3 cm</span></div>
+        <div class="value"><span>Offset stylo</span><span>13 cm</span></div>
       </section>
 
       <section class="card">
-        <h2>3. PID vitesse roues</h2>
-        <label>Kp vitesse</label>
-        <input id="kpSpeed" type="number" step="0.1" value="10">
-
-        <label>Ki vitesse</label>
-        <input id="kiSpeed" type="number" step="0.1" value="1.2">
-
-        <label>Kd vitesse</label>
-        <input id="kdSpeed" type="number" step="0.01" value="0.00">
-
-        <label>Limite intégrale</label>
-        <input id="integralLimit" type="number" step="1" value="20">
-
-        <label>Feed-forward kFF</label>
-        <input id="kFF" type="number" step="0.1" value="22">
-
-        <label>Vitesse fiable minimum moteur en cm/s</label>
-        <input id="minReliableSpeedCms" type="number" min="0.3" max="8" step="0.1" value="4.5">
-
-        <label>Période impulsions basse vitesse en ms</label>
-        <input id="pulsePeriodMs" type="number" min="60" max="1000" step="10" value="120">
-
-        <label>Filtre vitesse encodeurs alpha</label>
-        <input id="speedFilterAlpha" type="number" min="0.05" max="1" step="0.01" value="0.30">
-        <p class="hint">Baisser vers 0.15 si les grands rayons oscillent encore.</p>
-
-        <label>Correction PID max en PWM</label>
-        <input id="maxPidCorrectionPwm" type="number" min="0" max="100" step="1" value="35">
-
-        <label>Zone morte erreur vitesse en cm/s</label>
-        <input id="speedDeadbandCms" type="number" min="0" max="2" step="0.05" value="0.25">
-
-        <label>Kp correction ratio distances</label>
-        <input id="ratioTrimKp" type="number" min="0" max="120" step="1" value="35">
-
-        <label>Correction ratio max en PWM</label>
-        <input id="maxRatioTrimPwm" type="number" min="0" max="120" step="1" value="35">
-      </section>
-
-      <section class="card">
-        <h2>4. Commandes</h2>
-        <button class="btn-blue" onclick="sendCircleConfig()">Appliquer les valeurs</button>
-        <button class="btn-green" onclick="saveCircleConfig()">Enregistrer en mémoire</button>
-        <button class="btn-purple" onclick="startCircle()">Lancer cercle</button>
-        <button class="btn-red" onclick="api('/api/s2/cercle/stop')">STOP cercle</button>
-        <button class="btn-orange" onclick="api('/api/reset-encoders')">RESET odométrie</button>
-      </section>
-
-      <section class="card">
-        <h2>5. Géométrie calculée</h2>
-        <div class="value"><span>Rayon demandé stylo</span><span id="requestedRadiusCm">---</span></div>
-        <div class="value"><span>Rayon effectif utilisé</span><span id="effectiveRadiusCm">---</span></div>
-        <div class="value"><span>Rayon axe robot</span><span id="robotRadiusCm">---</span></div>
-        <div class="value"><span>Rayon roue intérieure</span><span id="innerWheelRadiusCm">---</span></div>
-        <div class="value"><span>Rayon roue extérieure</span><span id="outerWheelRadiusCm">---</span></div>
-        <div class="value"><span>Ratio vitesse int/ext</span><span id="speedRatio">---</span></div>
-        <div class="value"><span>Distance cible roue gauche</span><span id="targetLeftDistanceCm">---</span></div>
-        <div class="value"><span>Distance cible roue droite</span><span id="targetRightDistanceCm">---</span></div>
-        <div class="value"><span>Distance cible roue extérieure</span><span id="targetOuterDistanceCm">---</span></div>
-      </section>
-
-      <section class="card">
-        <h2>6. État cercle</h2>
-        <div class="value"><span>État</span><span id="circleState">---</span></div>
-        <div class="value"><span>Progression distance</span><span id="progressPercent">---</span></div>
-        <div class="value"><span>Progression angulaire</span><span id="angularProgressPercent">---</span></div>
-        <div class="value"><span>Différence roues</span><span id="wheelDistanceDiffCm">---</span></div>
-        <div class="value"><span>Différence cible</span><span id="targetWheelDistanceDiffCm">---</span></div>
-        <div class="value"><span>Distance gauche</span><span id="leftDistanceCm">---</span></div>
-        <div class="value"><span>Distance droite</span><span id="rightDistanceCm">---</span></div>
-        <div class="value"><span>Distance extérieure</span><span id="outerDistanceCm">---</span></div>
-        <div class="value"><span>Vitesse G cible / mesurée</span><span id="speedL">---</span></div>
-        <div class="value"><span>Vitesse D cible / mesurée</span><span id="speedR">---</span></div>
-        <div class="value"><span>PWM gauche</span><span id="circlePwmL">---</span></div>
-        <div class="value"><span>PWM droite</span><span id="circlePwmR">---</span></div>
-        <div class="value"><span>PWM moyen extérieur</span><span id="outerBasePwm">---</span></div>
-        <div class="value"><span>PWM moyen intérieur</span><span id="innerAveragePwm">---</span></div>
-        <div class="value"><span>Duty impulsions intérieur</span><span id="innerPulseDuty">---</span></div>
-        <div class="value"><span>Erreur</span><span id="circleError">---</span></div>
+        <h2>État robot</h2>
+        <div class="value"><span>État</span><span id="state">---</span></div>
+        <div class="value"><span>Mode</span><span id="mode">---</span></div>
+        <div class="value"><span>X</span><span id="odoX">---</span></div>
+        <div class="value"><span>Y</span><span id="odoY">---</span></div>
+        <div class="value"><span>Theta</span><span id="odoTheta">---</span></div>
       </section>
 
       <section class="card">
@@ -789,82 +688,14 @@ refreshLogs();
   </main>
 
   <script>
-  const circleFields = [
-    "radiusCm", "radiusScale", "radiusOffsetCm", "wheelBaseCm", "penOffsetCm", "direction",
-    "outerWheelSpeedCms", "closureFactor", "stopTurnFactor", "endSlowdownEnabled", "endSlowdownStart", "endSlowdownMinScale", "minPwm", "maxPwm", "pwmRampStep",
-    "kpSpeed", "kiSpeed", "kdSpeed", "integralLimit", "kFF",
-    "minReliableSpeedCms", "pulsePeriodMs", "speedFilterAlpha", "maxPidCorrectionPwm", "speedDeadbandCms", "ratioTrimKp", "maxRatioTrimPwm"
-  ];
-
-  function setCircleText(id, value) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = value;
-  }
-
-  async function loadCircleConfig() {
-    try {
-      const res = await fetch('/api/s2/cercle/config');
-      const d = await res.json();
-      circleFields.forEach(id => {
-        const el = document.getElementById(id);
-        if (el && d[id] !== undefined) el.value = d[id];
-      });
-    } catch(e) {}
-  }
-
-  async function sendCircleConfig() {
-    const params = new URLSearchParams();
-    circleFields.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) params.append(id, el.value);
-    });
-    await fetch('/api/s2/cercle/set?' + params.toString());
-  }
-
-  async function saveCircleConfig() {
-    await sendCircleConfig();
-    await fetch('/api/s2/cercle/save');
-  }
-
   async function startCircle() {
-    await sendCircleConfig();
-    await fetch('/api/s2/cercle/start');
-  }
+    const params = new URLSearchParams();
+    params.append("r", document.getElementById("circleRadius").value);
+    params.append("n", document.getElementById("circleSegments").value);
+    params.append("pwm", document.getElementById("circlePwm").value);
 
-  async function refreshCircleStatus() {
-    try {
-      const res = await fetch('/api/s2/cercle/status');
-      const d = await res.json();
-      setCircleText('circleState', d.state);
-      setCircleText('requestedRadiusCm', d.requestedRadiusCm.toFixed(2) + ' cm');
-      setCircleText('effectiveRadiusCm', d.effectiveRadiusCm.toFixed(2) + ' cm');
-      setCircleText('robotRadiusCm', d.robotRadiusCm.toFixed(2) + ' cm');
-      setCircleText('innerWheelRadiusCm', d.innerWheelRadiusCm.toFixed(2) + ' cm');
-      setCircleText('outerWheelRadiusCm', d.outerWheelRadiusCm.toFixed(2) + ' cm');
-      setCircleText('speedRatio', d.speedRatio.toFixed(3));
-      setCircleText('targetLeftDistanceCm', d.targetLeftDistanceCm.toFixed(2) + ' cm');
-      setCircleText('targetRightDistanceCm', d.targetRightDistanceCm.toFixed(2) + ' cm');
-      setCircleText('targetOuterDistanceCm', d.targetOuterDistanceCm.toFixed(2) + ' cm');
-      setCircleText('progressPercent', d.progressPercent.toFixed(1) + ' %');
-      setCircleText('angularProgressPercent', d.angularProgressPercent.toFixed(1) + ' %');
-      setCircleText('wheelDistanceDiffCm', d.wheelDistanceDiffCm.toFixed(2) + ' cm');
-      setCircleText('targetWheelDistanceDiffCm', d.targetWheelDistanceDiffCm.toFixed(2) + ' cm');
-      setCircleText('leftDistanceCm', d.leftDistanceCm.toFixed(2) + ' cm');
-      setCircleText('rightDistanceCm', d.rightDistanceCm.toFixed(2) + ' cm');
-      setCircleText('outerDistanceCm', d.outerDistanceCm.toFixed(2) + ' cm');
-      setCircleText('speedL', d.targetLeftSpeedCms.toFixed(2) + ' / ' + d.measuredLeftSpeedCms.toFixed(2));
-      setCircleText('speedR', d.targetRightSpeedCms.toFixed(2) + ' / ' + d.measuredRightSpeedCms.toFixed(2));
-      setCircleText('circlePwmL', d.pwmLeft);
-      setCircleText('circlePwmR', d.pwmRight);
-      setCircleText('outerBasePwm', d.outerBasePwm.toFixed(1));
-      setCircleText('innerAveragePwm', d.innerAveragePwm.toFixed(1));
-      setCircleText('innerPulseDuty', (100*d.innerPulseDuty).toFixed(0) + ' %');
-      setCircleText('circleError', d.errorMessage || '-');
-    } catch(e) {}
+    await fetch("/api/s2/cercle/start?" + params.toString());
   }
-
-  loadCircleConfig();
-  setInterval(refreshCircleStatus, 250);
   </script>
   )rawliteral";
 
