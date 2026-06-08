@@ -13,6 +13,7 @@
 #include "soutenance2.h"
 #include "pen_inverse_follower.h"
 #include "motor_calibration.h"
+#include "compass_arrow.h"
 
 // ==================================================
 // TIMERS
@@ -46,6 +47,7 @@ void setup() {
 
   Soutenance2::begin();
   PenInverseFollower::begin();
+  CompassArrow::begin();
 
   MotorCalibration::begin();
 
@@ -62,6 +64,7 @@ void loop() {
     Sensors::update(now, dt);
     Odometry::update(now);
     Soutenance2::update(now, dt);
+    CompassArrow::update(now, dt);
     PenInverseFollower::update(now, dt);
     MotorCalibration::update(now);
   }

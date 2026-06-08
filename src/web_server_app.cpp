@@ -15,6 +15,7 @@
 #include "page_s2_cercle.h"
 #include "trajectory_generator.h"
 #include "circle_trajectory_helper.h"
+#include "compass_arrow.h"
 
 // ==================================================
 // WIFI ESP32 EN POINT D'ACCES
@@ -40,6 +41,7 @@ static void setRobotMotors(int leftPwm, int rightPwm) {
   // Si une commande manuelle arrive, on arrête le suivi automatique du stylo.
   PenInverseFollower::stop();
   Soutenance2::stop();
+  CompassArrow::stop();
 
   motorState.pwmLeft = constrain(leftPwm, -255, 255);
   motorState.pwmRight = constrain(rightPwm, -255, 255);
@@ -51,6 +53,7 @@ static void setRobotMotors(int leftPwm, int rightPwm) {
 static void stopRobot() {
   PenInverseFollower::stop();
   Soutenance2::stop();
+  CompassArrow::stop();
 
   motorState.pwmLeft = 0;
   motorState.pwmRight = 0;
@@ -223,6 +226,7 @@ static void handleStatus() {
   if (sensorState.magCalibrationDone) magCalibState = "OK";
 
   PenInverseFollower::Status pf = PenInverseFollower::getStatus();
+  CompassArrow::Status compass = CompassArrow::getStatus();
 
   String json = "{";
 
@@ -243,6 +247,7 @@ static void handleStatus() {
   json += "\"gyroZ\":" + String(sensorState.gyroZ, 3) + ",";
   json += "\"yawGyro\":" + String(sensorState.yawGyroDeg, 3) + ",";
 
+  json += "\"magOk\":" + String(sensorState.magOk ? "true" : "false") + ",";
   json += "\"magX\":" + String(sensorState.magX, 3) + ",";
   json += "\"magY\":" + String(sensorState.magY, 3) + ",";
   json += "\"magZ\":" + String(sensorState.magZ, 3) + ",";
@@ -292,7 +297,19 @@ static void handleStatus() {
   json += "\"followerVLeft\":" + String(pf.vLeftCms, 3) + ",";
   json += "\"followerVRight\":" + String(pf.vRightCms, 3) + ",";
   json += "\"followerPwmLeft\":" + String(pf.pwmLeft) + ",";
-  json += "\"followerPwmRight\":" + String(pf.pwmRight);
+  json += "\"followerPwmRight\":" + String(pf.pwmRight) + ",";
+
+  json += "\"compassRunning\":" + String(compass.running ? "true" : "false") + ",";
+  json += "\"compassCalibrating\":" + String(compass.calibrating ? "true" : "false") + ",";
+  json += "\"compassDrawing\":" + String(compass.drawing ? "true" : "false") + ",";
+  json += "\"compassFinished\":" + String(compass.finished ? "true" : "false") + ",";
+  json += "\"compassPhase\":\"" + compass.phaseName + "\",";
+  json += "\"compassMessage\":\"" + compass.message + "\",";
+  json += "\"compassNorthError\":" + String(compass.northErrorDeg, 3) + ",";
+  json += "\"compassInNorthWindow\":" + String(compass.inNorthWindow ? "true" : "false") + ",";
+  json += "\"compassPwmLeft\":" + String(compass.pwmLeft) + ",";
+  json += "\"compassPwmRight\":" + String(compass.pwmRight) + ",";
+  json += "\"compassTrajectorySegments\":" + String(compass.trajectorySegments);
 
   json += "}";
 
@@ -543,19 +560,81 @@ static void handleS2CercleStartWheel() {
 static void handleS2CercleStop() {
   PenInverseFollower::stop();
   Soutenance2::stop();
+  CompassArrow::stop();
   server.send(200, "text/plain", "S2_CERCLE_STOP");
 }
 
-static void handleS2RoseStart() {
-  float length = server.hasArg("length") ? server.arg("length").toFloat() : 10.0f;
-  int pwm = server.hasArg("pwm") ? server.arg("pwm").toInt() : 150;
+static CompassArrow::Config roseConfigFromRequest() {
+  CompassArrow::Config cfg = CompassArrow::defaultConfig();
 
-  Logger::log("Demande sequence ROSE DES VENTS");
-  Logger::log("longueur=" + String(length, 1) +
-              " pwm=" + String(pwm) +
-              " capMag=" + String(sensorState.headingMagDeg, 1));
+  if (server.hasArg("shaft")) cfg.shaftCm = server.arg("shaft").toFloat();
+  if (server.hasArg("length")) cfg.shaftCm = server.arg("length").toFloat();
+  if (server.hasArg("head")) cfg.headSideCm = server.arg("head").toFloat();
+  if (server.hasArg("fill")) cfg.fillStepCm = server.arg("fill").toFloat();
+  if (server.hasArg("drawSpeed")) cfg.drawSpeedCms = server.arg("drawSpeed").toFloat();
+
+  if (server.hasArg("alignPwm")) cfg.alignPwm = server.arg("alignPwm").toInt();
+  if (server.hasArg("calibrationPwm")) cfg.calibrationPwm = server.arg("calibrationPwm").toInt();
+  if (server.hasArg("pwm")) cfg.alignPwm = server.arg("pwm").toInt();
+
+  cfg.clockwise = parseBoolArg("clockwise", cfg.clockwise);
+
+  if (server.hasArg("tolerance")) cfg.alignToleranceDeg = server.arg("tolerance").toFloat();
+  if (server.hasArg("slowZone")) cfg.slowZoneDeg = server.arg("slowZone").toFloat();
+
+  return cfg;
+}
+
+static String roseStatusJson() {
+  CompassArrow::Status st = CompassArrow::getStatus();
+
+  String json = "{";
+  json += "\"running\":" + String(st.running ? "true" : "false") + ",";
+  json += "\"calibrating\":" + String(st.calibrating ? "true" : "false") + ",";
+  json += "\"drawing\":" + String(st.drawing ? "true" : "false") + ",";
+  json += "\"finished\":" + String(st.finished ? "true" : "false") + ",";
+  json += "\"phase\":\"" + st.phaseName + "\",";
+  json += "\"message\":\"" + st.message + "\",";
+  json += "\"heading\":" + String(st.headingDeg, 3) + ",";
+  json += "\"northError\":" + String(st.northErrorDeg, 3) + ",";
+  json += "\"inNorthWindow\":" + String(st.inNorthWindow ? "true" : "false") + ",";
+  json += "\"pwmLeft\":" + String(st.pwmLeft) + ",";
+  json += "\"pwmRight\":" + String(st.pwmRight) + ",";
+  json += "\"trajectorySegments\":" + String(st.trajectorySegments);
+  json += "}";
+
+  return json;
+}
+
+static void handleS2RoseStatus() {
+  server.send(200, "application/json", roseStatusJson());
+}
+
+static void handleS2RoseCalibrateStart() {
+  CompassArrow::Config cfg = roseConfigFromRequest();
+
+  if (!CompassArrow::startCalibration(cfg)) {
+    server.send(400, "text/plain", "S2_ROSE_CALIBRATION_ERROR");
+    return;
+  }
+
+  server.send(200, "text/plain", "S2_ROSE_CALIBRATION_START");
+}
+
+static void handleS2RoseStart() {
+  CompassArrow::Config cfg = roseConfigFromRequest();
+
+  if (!CompassArrow::startArrow(cfg)) {
+    server.send(400, "text/plain", "S2_ROSE_START_ERROR");
+    return;
+  }
 
   server.send(200, "text/plain", "S2_ROSE_START");
+}
+
+static void handleS2RoseStop() {
+  CompassArrow::stop();
+  server.send(200, "text/plain", "S2_ROSE_STOP");
 }
 
 // ==================================================
@@ -613,7 +692,10 @@ namespace WebApp {
     server.on("/api/s2/cercle/start-spin", handleS2CercleStartSpin);
     server.on("/api/s2/cercle/start-wheel", handleS2CercleStartWheel);
     server.on("/api/s2/cercle/stop", handleS2CercleStop);
+    server.on("/api/s2/rose/status", handleS2RoseStatus);
+    server.on("/api/s2/rose/calibrate/start", handleS2RoseCalibrateStart);
     server.on("/api/s2/rose/start", handleS2RoseStart);
+    server.on("/api/s2/rose/stop", handleS2RoseStop);
 
     server.begin();
 

@@ -921,60 +921,91 @@ refreshLogs();
 
     html += R"rawliteral(
   <main>
-    <h1>Soutenance 2 - Séquence 3 : rose des vents</h1>
-    <p class="subtitle">
-      Orientation du robot vers le Nord grâce au magnétomètre.
-    </p>
+    <h1>Soutenance 2 - Sequence 3 : fleche Nord</h1>
 
     <p>
-      <a href="/soutenance2">← Retour soutenance 2</a>
+      <a href="/soutenance2">&larr; Retour soutenance 2</a>
     </p>
 
     <div class="grid">
       <section class="card">
-        <h2>Calibration magnétomètre</h2>
-        <p>
-          Les valeurs de calibration sont automatiquement chargées au démarrage.
-        </p>
+        <h2>Calibration magnetometre</h2>
 
-        <div class="value"><span>Calibration chargée</span><span id="magCalibrationLoaded">---</span></div>
+        <label>PWM calibration</label>
+        <input id="calibrationPwm" type="number" value="190" min="180" max="255" step="1">
+
+        <label>Sens de rotation</label>
+        <select id="clockwise">
+          <option value="1">Horaire</option>
+          <option value="0">Antihoraire</option>
+        </select>
+
+        <br><br>
+        <button class="btn-green" onclick="startCalibration()">Calibration automatique 20 s</button>
+        <button class="btn-red" onclick="api('/api/clear-mag-calibration')">Effacer calibration</button>
+
+        <div class="value"><span>Magnetometre</span><span id="magOk">---</span></div>
+        <div class="value"><span>Calibration</span><span id="magCalib">---</span></div>
+        <div class="value"><span>Calibration chargee</span><span id="magCalibrationLoaded">---</span></div>
         <div class="value"><span>Offset X</span><span id="magOffsetX">---</span></div>
         <div class="value"><span>Offset Y</span><span id="magOffsetY">---</span></div>
         <div class="value"><span>Scale X</span><span id="magScaleX">---</span></div>
         <div class="value"><span>Scale Y</span><span id="magScaleY">---</span></div>
-
-        <br>
-        <button class="btn-green" onclick="api('/api/calibrate-mag')">
-          Recalibrer et enregistrer
-        </button>
-
-        <button class="btn-red" onclick="api('/api/clear-mag-calibration')">
-          Effacer calibration sauvegardée
-        </button>
       </section>
 
       <section class="card">
-        <h2>Rose des vents</h2>
+        <h2>Angle actuel</h2>
 
-        <label>Longueur flèche en cm</label>
-        <input id="compassLength" type="number" value="10" min="3" max="30" step="0.1"><br>
+        <div style="font-size:48px;font-weight:bold;font-family:Consolas,monospace">
+          <span id="headingMag">---</span>
+        </div>
+        <div id="northBadge" style="display:inline-block;margin:10px 0;padding:8px 12px;border-radius:999px;background:#334155;font-weight:bold">
+          ---
+        </div>
 
-        <label>PWM rotation</label>
-        <input id="compassPwm" type="number" value="150" min="80" max="255" step="1">
+        <div class="value"><span>Erreur au Nord</span><span id="northError">---</span></div>
+        <div class="value"><span>Fenetre Nord</span><span>358 deg a 3 deg</span></div>
+        <div class="value"><span>Phase</span><span id="rosePhase">---</span></div>
+        <div class="value"><span>Message</span><span id="roseMessage">---</span></div>
+        <div class="value"><span>PWM G/D</span><span id="rosePwm">---</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Fleche Nord</h2>
+
+        <label>Trait principal - cm</label>
+        <input id="shaft" type="number" value="10.0" min="2" max="30" step="0.1">
+
+        <label>Cote triangle - cm</label>
+        <input id="head" type="number" value="3.0" min="1" max="8" step="0.1">
+
+        <label>Pas remplissage triangle - cm</label>
+        <input id="fill" type="number" value="0.35" min="0.15" max="2" step="0.05">
+
+        <label>Vitesse dessin - cm/s</label>
+        <input id="drawSpeed" type="number" value="8.0" min="2" max="16" step="0.1">
+
+        <label>PWM alignement Nord</label>
+        <input id="alignPwm" type="number" value="190" min="180" max="255" step="1">
+
+        <label>Tolerance arret Nord - deg</label>
+        <input id="tolerance" type="number" value="1.0" min="0.5" max="5" step="0.1">
 
         <br><br>
-        <button class="btn-purple" onclick="startCompass()">
-          Lancer orientation Nord
-        </button>
-
-        <button class="btn-red" onclick="api('/api/stop')">STOP</button>
+        <button class="btn-purple" onclick="startArrow()">Lancer fleche Nord</button>
+        <button class="btn-red" onclick="api('/api/s2/rose/stop')">STOP rose</button>
+        <button class="btn-red" onclick="api('/api/stop')">STOP moteurs</button>
       </section>
 
       <section class="card">
-        <h2>Orientation</h2>
-        <div class="value"><span>Cap magnétique</span><span id="headingMag">---</span></div>
-        <div class="value"><span>Yaw gyro</span><span id="yawGyro">---</span></div>
-        <div class="value"><span>Theta odométrie</span><span id="odoTheta">---</span></div>
+        <h2>Etat robot</h2>
+        <div class="value"><span>Etat</span><span id="state">---</span></div>
+        <div class="value"><span>Mode</span><span id="mode">---</span></div>
+        <div class="value"><span>PWM gauche</span><span id="pwmL">---</span></div>
+        <div class="value"><span>PWM droite</span><span id="pwmR">---</span></div>
+        <div class="value"><span>X stylo</span><span id="penX">---</span></div>
+        <div class="value"><span>Y stylo</span><span id="penY">---</span></div>
+        <div class="value"><span>Segments fleche</span><span id="roseSegments">---</span></div>
       </section>
 
       <section class="card">
@@ -985,35 +1016,98 @@ refreshLogs();
   </main>
 
   <script>
-  async function startCompass() {
-    const params = new URLSearchParams();
-    params.append("length", document.getElementById("compassLength").value);
-    params.append("pwm", document.getElementById("compassPwm").value);
-
-    await fetch("/api/s2/rose/start?" + params.toString());
+  function el(id) { return document.getElementById(id); }
+  function v(id) { return el(id).value; }
+  function setText(id, value) { const e = el(id); if (e) e.textContent = value; }
+  function fmt(value, digits = 1) {
+    if (value === null || value === undefined || isNaN(value)) return "---";
+    return Number(value).toFixed(digits);
   }
-  </script>
-  )rawliteral";
 
-    html += commonScript();
+  function roseParams() {
+    const params = new URLSearchParams();
+    params.append("shaft", v("shaft"));
+    params.append("head", v("head"));
+    params.append("fill", v("fill"));
+    params.append("drawSpeed", v("drawSpeed"));
+    params.append("alignPwm", v("alignPwm"));
+    params.append("calibrationPwm", v("calibrationPwm"));
+    params.append("clockwise", v("clockwise"));
+    params.append("tolerance", v("tolerance"));
+    return params;
+  }
 
-    html += R"rawliteral(
-  <script>
-  async function refreshCompassCalibration() {
+  async function api(route) {
+    await fetch(route);
+    await refreshAll();
+  }
+
+  async function startCalibration() {
+    await fetch("/api/s2/rose/calibrate/start?" + roseParams().toString());
+    await refreshAll();
+  }
+
+  async function startArrow() {
+    await fetch("/api/s2/rose/start?" + roseParams().toString());
+    await refreshAll();
+  }
+
+  async function refreshLogs() {
     try {
-      const res = await fetch("/api/status");
-      const d = await res.json();
+      const res = await fetch("/api/logs");
+      el("console").textContent = await res.text();
+    } catch(e) {
+      el("console").textContent = "Erreur lecture console";
+    }
+  }
 
-      setText("magCalibrationLoaded", d.magCalibrationLoaded ? "OUI" : "NON");
-      setText("magOffsetX", fmt(d.magOffsetX, 2));
-      setText("magOffsetY", fmt(d.magOffsetY, 2));
-      setText("magScaleX", fmt(d.magScaleX, 4));
-      setText("magScaleY", fmt(d.magScaleY, 4));
+  async function refreshAll() {
+    try {
+      const statusRes = await fetch("/api/status");
+      const status = await statusRes.json();
+
+      const roseRes = await fetch("/api/s2/rose/status");
+      const rose = await roseRes.json();
+
+      setText("state", status.state);
+      setText("mode", status.mode);
+      setText("pwmL", status.pwmL);
+      setText("pwmR", status.pwmR);
+      setText("penX", fmt(status.penX, 2) + " cm");
+      setText("penY", fmt(status.penY, 2) + " cm");
+
+      setText("magOk", status.magOk ? "OK" : "NON");
+      setText("magCalib", status.magCalib);
+      setText("magCalibrationLoaded", status.magCalibrationLoaded ? "OUI" : "NON");
+      setText("magOffsetX", fmt(status.magOffsetX, 2));
+      setText("magOffsetY", fmt(status.magOffsetY, 2));
+      setText("magScaleX", fmt(status.magScaleX, 4));
+      setText("magScaleY", fmt(status.magScaleY, 4));
+
+      setText("headingMag", fmt(status.headingMag, 1) + " deg");
+      setText("northError", fmt(rose.northError, 2) + " deg");
+      setText("rosePhase", rose.phase);
+      setText("roseMessage", rose.message || "---");
+      setText("rosePwm", rose.pwmLeft + " / " + rose.pwmRight);
+      setText("roseSegments", rose.trajectorySegments);
+
+      const badge = el("northBadge");
+      if (rose.inNorthWindow) {
+        badge.textContent = "NORD OK";
+        badge.style.background = "#22c55e";
+        badge.style.color = "#052e16";
+      } else {
+        badge.textContent = "PAS AU NORD";
+        badge.style.background = "#334155";
+        badge.style.color = "#e5e7eb";
+      }
     } catch(e) {}
   }
 
-  setInterval(refreshCompassCalibration, 500);
-  refreshCompassCalibration();
+  refreshAll();
+  refreshLogs();
+  setInterval(refreshAll, 250);
+  setInterval(refreshLogs, 1000);
   </script>
   )rawliteral";
 
