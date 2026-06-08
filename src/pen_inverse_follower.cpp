@@ -24,6 +24,11 @@ namespace {
   PenInverseFollower::Config cfg;
   PenInverseFollower::Status status;
 
+  struct PwmPair {
+    int left;
+    int right;
+  };
+
   static const int MAX_SEGMENTS_LOCAL = TrajectoryGenerator::MAX_SEGMENTS;
   PenInverseFollower::Segment segments[MAX_SEGMENTS_LOCAL];
 
@@ -180,6 +185,71 @@ namespace {
     return 0;
   }
 
+  PwmPair floorSameDirectionPair(int rawLeft, int rawRight, int sign) {
+    int absLeft = abs(rawLeft);
+    int absRight = abs(rawRight);
+
+    if (absLeft == 0 && absRight == 0) {
+      return {0, 0};
+    }
+
+    if (cfg.minPwm <= 0) {
+      return {
+        constrain(sign * absLeft, -255, 255),
+        constrain(sign * absRight, -255, 255)
+      };
+    }
+
+    int maxAbs = max(absLeft, absRight);
+    int minAbs = min(absLeft, absRight);
+
+    int outMax = 0;
+    int outMin = 0;
+
+    if (minAbs == 0) {
+      outMax = 255;
+      outMin = cfg.minPwm;
+    } else {
+      float scale = ((float)cfg.minPwm) / ((float)minAbs);
+      outMin = cfg.minPwm;
+      outMax = (int)round(maxAbs * scale);
+
+      if (outMax > 255) {
+        outMax = 255;
+        outMin = max(cfg.minPwm, (int)round(255.0f * ((float)minAbs / (float)maxAbs)));
+      }
+    }
+
+    outMax = constrain(outMax, cfg.minPwm, 255);
+    outMin = constrain(outMin, cfg.minPwm, 255);
+
+    int left = (absLeft >= absRight) ? outMax : outMin;
+    int right = (absRight > absLeft) ? outMax : outMin;
+
+    return {sign * left, sign * right};
+  }
+
+  PwmPair forwardOnlyPairForStair(int rawLeft, int rawRight) {
+    if (rawLeft == 0 && rawRight == 0) {
+      return {0, 0};
+    }
+
+    if (rawLeft < 0 && rawRight < 0) {
+      return {0, 0};
+    }
+
+    if (rawLeft < 0 || rawRight < 0) {
+      // En escalier, on evite la marche arriere : le virage le plus serre
+      // disponible devient 180/255 au lieu de -180/180.
+      if (rawLeft > rawRight) {
+        return {255, cfg.minPwm};
+      }
+      return {cfg.minPwm, 255};
+    }
+
+    return floorSameDirectionPair(rawLeft, rawRight, 1);
+  }
+
   bool isSmallDitherCommand(int rawPwm) {
     return cfg.pwmDither && cfg.minPwm > 0 && abs(rawPwm) > 0 && abs(rawPwm) < cfg.minPwm;
   }
@@ -298,6 +368,8 @@ namespace PenInverseFollower {
     if (cfg.pwmSlewStep < 1) cfg.pwmSlewStep = 1;
     if (cfg.pwmSlewStep > 255) cfg.pwmSlewStep = 255;
     if (cfg.segmentToleranceCm < 0.01f) cfg.segmentToleranceCm = 0.01f;
+    cfg.stairMiddleExtraCm = clampFloat(cfg.stairMiddleExtraCm, 0.0f, 12.0f);
+    cfg.stairSecondAngleTrimDeg = clampFloat(cfg.stairSecondAngleTrimDeg, 0.0f, 60.0f);
 
     applyPidConfig();
 
@@ -342,6 +414,8 @@ namespace PenInverseFollower {
       cfg.cornerOmegaRadS = prefs.getFloat("cornerOm", cfg.cornerOmegaRadS);
       cfg.cornerExitAngleDeg = prefs.getFloat("cornerEx", cfg.cornerExitAngleDeg);
       cfg.cornerMaxDurationS = prefs.getFloat("cornerDur", cfg.cornerMaxDurationS);
+      cfg.stairMiddleExtraCm = prefs.getFloat("stairMidEx", cfg.stairMiddleExtraCm);
+      cfg.stairSecondAngleTrimDeg = prefs.getFloat("stairAngTr", cfg.stairSecondAngleTrimDeg);
 
       cfg.kp = prefs.getFloat("kp", cfg.kp);
       cfg.ki = prefs.getFloat("ki", cfg.ki);
@@ -400,6 +474,8 @@ namespace PenInverseFollower {
     prefs.putFloat("cornerOm", cfg.cornerOmegaRadS);
     prefs.putFloat("cornerEx", cfg.cornerExitAngleDeg);
     prefs.putFloat("cornerDur", cfg.cornerMaxDurationS);
+    prefs.putFloat("stairMidEx", cfg.stairMiddleExtraCm);
+    prefs.putFloat("stairAngTr", cfg.stairSecondAngleTrimDeg);
 
     prefs.putFloat("kp", cfg.kp);
     prefs.putFloat("ki", cfg.ki);
@@ -475,8 +551,10 @@ namespace PenInverseFollower {
 
   void startStair(float d1Cm, float angleLeftDeg, float d2Cm, float angleRightDeg, float d3Cm) {
     float d1 = d1Cm * cfg.distanceScale;
-    float d2 = d2Cm * cfg.distanceScale;
+    float d2 = (d2Cm + cfg.stairMiddleExtraCm) * cfg.distanceScale;
     float d3 = d3Cm * cfg.distanceScale;
+    float effectiveAngleRightDeg = angleRightDeg - cfg.stairSecondAngleTrimDeg;
+    effectiveAngleRightDeg = clampFloat(effectiveAngleRightDeg, 10.0f, angleRightDeg);
 
     Point p0 {0.0f, 0.0f};
 
@@ -494,7 +572,7 @@ namespace PenInverseFollower {
       p1.y + d2 * sin(theta)
     };
 
-    theta -= degToRad(angleRightDeg);
+    theta -= degToRad(effectiveAngleRightDeg);
 
     Point p3 {
       p2.x + d3 * cos(theta),
@@ -508,7 +586,12 @@ namespace PenInverseFollower {
     Odometry::resetPose(-cfg.penOffsetCm, 0.0f, 0.0f);
     startSegments(3);
 
-    Logger::log("Escalier stylo lance");
+    Logger::log("Escalier stylo lance : compensation trait2=" +
+                String(cfg.stairMiddleExtraCm, 2) +
+                " cm correction angle2=" +
+                String(cfg.stairSecondAngleTrimDeg, 1) +
+                " deg angle2 effectif=" +
+                String(effectiveAngleRightDeg, 1) + " deg");
   }
 
   bool startTrajectory(const TrajectoryGenerator::Trajectory& trajectory) {
@@ -708,10 +791,19 @@ namespace PenInverseFollower {
 
     bool useDither = cfg.pwmDither && segmentCount > 3;
 
-    int pwmLeftTarget = useDither ? ditherPwmCommand(pwmLeftRaw, ditherAccumulatorLeft)
-                                  : applyMinPwm(pwmLeftRaw);
-    int pwmRightTarget = useDither ? ditherPwmCommand(pwmRightRaw, ditherAccumulatorRight)
-                                   : applyMinPwm(pwmRightRaw);
+    int pwmLeftTarget = 0;
+    int pwmRightTarget = 0;
+
+    if (!useDither && !cfg.allowReverse && segmentCount <= 3) {
+      PwmPair pair = forwardOnlyPairForStair(pwmLeftRaw, pwmRightRaw);
+      pwmLeftTarget = pair.left;
+      pwmRightTarget = pair.right;
+    } else {
+      pwmLeftTarget = useDither ? ditherPwmCommand(pwmLeftRaw, ditherAccumulatorLeft)
+                                : applyMinPwm(pwmLeftRaw);
+      pwmRightTarget = useDither ? ditherPwmCommand(pwmRightRaw, ditherAccumulatorRight)
+                                 : applyMinPwm(pwmRightRaw);
+    }
 
     if (!useDither) {
       ditherAccumulatorLeft = 0.0f;

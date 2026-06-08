@@ -72,6 +72,12 @@ namespace PenInverseFollower {
     float cornerOmegaRadS = 4.0f;
     float cornerExitAngleDeg = 5.0f;
     float cornerMaxDurationS = 1.80f;
+
+    // Compense la partie du trait 2 consommee par les deux virages de l'escalier.
+    float stairMiddleExtraCm = 4.0f;
+
+    // Compense le surplus observe sur le 2e angle de l'escalier.
+    float stairSecondAngleTrimDeg = 35.0f;
   };
 
   struct Status {

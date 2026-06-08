@@ -11,6 +11,7 @@
 #include "sensors.h"
 #include "logger.h"
 #include "pen_inverse_follower.h"
+#include "soutenance2.h"
 #include "page_s2_cercle.h"
 #include "trajectory_generator.h"
 #include "circle_trajectory_helper.h"
@@ -38,6 +39,7 @@ static String robotStateName() {
 static void setRobotMotors(int leftPwm, int rightPwm) {
   // Si une commande manuelle arrive, on arrête le suivi automatique du stylo.
   PenInverseFollower::stop();
+  Soutenance2::stop();
 
   motorState.pwmLeft = constrain(leftPwm, -255, 255);
   motorState.pwmRight = constrain(rightPwm, -255, 255);
@@ -48,6 +50,7 @@ static void setRobotMotors(int leftPwm, int rightPwm) {
 
 static void stopRobot() {
   PenInverseFollower::stop();
+  Soutenance2::stop();
 
   motorState.pwmLeft = 0;
   motorState.pwmRight = 0;
@@ -121,6 +124,8 @@ static void applyPenInverseConfigFromRequest() {
   if (server.hasArg("minForwardSpeed")) cfg.minForwardSpeedCms = server.arg("minForwardSpeed").toFloat();
 
   if (server.hasArg("segTol")) cfg.segmentToleranceCm = server.arg("segTol").toFloat();
+  if (server.hasArg("stairMiddleExtra")) cfg.stairMiddleExtraCm = server.arg("stairMiddleExtra").toFloat();
+  if (server.hasArg("stairAngleTrim")) cfg.stairSecondAngleTrimDeg = server.arg("stairAngleTrim").toFloat();
 
   PenInverseFollower::setConfig(cfg);
 }
@@ -156,7 +161,9 @@ static String penInverseConfigJson() {
   json += "\"allowReverse\":" + String(cfg.allowReverse ? "true" : "false") + ",";
   json += "\"minForwardSpeed\":" + String(cfg.minForwardSpeedCms, 3) + ",";
 
-  json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3);
+  json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3) + ",";
+  json += "\"stairMiddleExtra\":" + String(cfg.stairMiddleExtraCm, 3) + ",";
+  json += "\"stairAngleTrim\":" + String(cfg.stairSecondAngleTrimDeg, 3);
 
   json += "}";
 
@@ -431,6 +438,7 @@ static bool parseBoolArg(const char* name, bool defaultValue) {
 }
 
 static void handleS2CercleStartSmall() {
+  Soutenance2::stop();
   applyPenInverseConfigFromRequest();
 
   PenInverseFollower::Config cfg = PenInverseFollower::getConfig();
@@ -439,6 +447,7 @@ static void handleS2CercleStartSmall() {
   req.radiusCm = server.hasArg("radius") ? server.arg("radius").toFloat() : 5.0f;
   req.segments = server.hasArg("segments") ? server.arg("segments").toInt() : 96;
   req.clockwise = parseBoolArg("clockwise", true);
+  req.distanceScale = cfg.distanceScale;
 
   String startMode = server.hasArg("startMode") ? server.arg("startMode") : "bottom";
   startMode.toLowerCase();
@@ -493,8 +502,23 @@ static void handleS2CercleStart() {
   handleS2CercleStartSmall();
 }
 
+static void handleS2CercleStartSpin() {
+  float radius = server.hasArg("radius") ? server.arg("radius").toFloat() : 8.0f;
+  bool clockwise = parseBoolArg("clockwise", true);
+  int pwm = server.hasArg("pwm") ? server.arg("pwm").toInt() : 200;
+  float stopAdvance = server.hasArg("stopAdvance") ? server.arg("stopAdvance").toFloat() : 8.0f;
+
+  if (!Soutenance2::startSpinCircle(radius, clockwise, pwm, stopAdvance)) {
+    server.send(400, "text/plain", "S2_CIRCLE_SPIN_ERROR");
+    return;
+  }
+
+  server.send(200, "text/plain", "S2_CIRCLE_SPIN_START");
+}
+
 static void handleS2CercleStop() {
   PenInverseFollower::stop();
+  Soutenance2::stop();
   server.send(200, "text/plain", "S2_CERCLE_STOP");
 }
 
@@ -562,6 +586,7 @@ namespace WebApp {
     // API futures séquences
     server.on("/api/s2/cercle/start", handleS2CercleStart);
     server.on("/api/s2/cercle/start-small", handleS2CercleStartSmall);
+    server.on("/api/s2/cercle/start-spin", handleS2CercleStartSpin);
     server.on("/api/s2/cercle/stop", handleS2CercleStop);
     server.on("/api/s2/rose/start", handleS2RoseStart);
 

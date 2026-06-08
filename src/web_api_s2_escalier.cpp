@@ -49,6 +49,8 @@ namespace {
     if (server().hasArg("pwmSlewStep")) cfg.pwmSlewStep = server().arg("pwmSlewStep").toInt();
 
     if (server().hasArg("segTol")) cfg.segmentToleranceCm = server().arg("segTol").toFloat();
+    if (server().hasArg("stairMiddleExtra")) cfg.stairMiddleExtraCm = server().arg("stairMiddleExtra").toFloat();
+    if (server().hasArg("stairAngleTrim")) cfg.stairSecondAngleTrimDeg = server().arg("stairAngleTrim").toFloat();
 
     if (server().hasArg("cornerMode")) cfg.cornerMode = server().arg("cornerMode").toInt() != 0;
     if (server().hasArg("cornerApproach")) cfg.cornerApproachCm = server().arg("cornerApproach").toFloat();
@@ -93,6 +95,8 @@ namespace {
     json += "\"pwmSlewStep\":" + String(cfg.pwmSlewStep) + ",";
 
     json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3) + ",";
+    json += "\"stairMiddleExtra\":" + String(cfg.stairMiddleExtraCm, 3) + ",";
+    json += "\"stairAngleTrim\":" + String(cfg.stairSecondAngleTrimDeg, 3) + ",";
 
     json += "\"cornerMode\":" + String(cfg.cornerMode ? "true" : "false") + ",";
     json += "\"cornerApproach\":" + String(cfg.cornerApproachCm, 3) + ",";

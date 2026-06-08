@@ -9,7 +9,7 @@ String html() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Drawbot - Petit cercle</title>
+<title>Drawbot - Cercles</title>
 <style>
 :root{--bg:#0f172a;--panel:#020617;--card:#111827;--border:#1e293b;--text:#e5e7eb;--muted:#94a3b8;--accent:#38bdf8;--green:#22c55e;--red:#ef4444;--orange:#f97316;--purple:#a855f7}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}main{padding:22px}h1{margin:0 0 6px;font-size:26px}.subtitle{color:var(--muted);margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(285px,1fr));gap:16px}.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 10px 28px rgba(0,0,0,.25)}h2{font-size:18px;margin:0 0 12px}label{display:block;color:var(--muted);font-size:13px;margin-top:10px;margin-bottom:5px}input,select{width:100%;border-radius:10px;border:1px solid var(--border);background:#020617;color:var(--text);padding:9px;font-size:14px}button{border:0;border-radius:12px;padding:11px 12px;color:white;font-weight:bold;cursor:pointer;width:100%;margin-top:8px}.btn-blue{background:var(--accent);color:#082f49}.btn-green{background:var(--green)}.btn-red{background:var(--red)}.btn-orange{background:var(--orange)}.btn-purple{background:var(--purple)}.btn-dark{background:#334155}.value{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(148,163,184,.15);padding:7px 0;font-size:13px}.value span:first-child{color:var(--muted)}.value span:last-child{font-family:Consolas,monospace;font-weight:bold;text-align:right}.console{background:#020617;border:1px solid var(--border);border-radius:14px;padding:10px;height:180px;overflow:auto;color:#a7f3d0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap}a{color:var(--accent)}p{color:var(--muted);font-size:13px;line-height:1.42}
@@ -17,13 +17,24 @@ String html() {
 </head>
 <body>
 <main>
-<h1>Soutenance 2 - Petit cercle</h1>
-<p class="subtitle">Commande d'un cercle de petit rayon avec le stylo. Le robot peut avancer et reculer pour suivre la trajectoire.</p>
+<h1>Soutenance 2 - Cercles 5 / 8 / 12 cm</h1>
+<p class="subtitle">Trois profils : petit cercle en avance/recul, cercle par rotation sur place, puis cercle plus grand par suivi du stylo.</p>
 <p><a href="/soutenance2">← Retour soutenance 2</a></p>
 
 <div class="grid">
 <section class="card">
-  <h2>1. Cercle</h2>
+  <h2>1. Lancements rapides</h2>
+  <button class="btn-orange" onclick="startCircle5()">R=5 cm - avance / recul</button>
+  <button class="btn-purple" onclick="startSpin8()">R=8 cm - rotation sur place</button>
+  <button class="btn-green" onclick="startCircle12()">R=12 cm - suivi continu</button>
+
+  <label>PWM rotation R=8</label>
+  <input id="spinPwm" type="number" value="200" min="180" max="255" step="1">
+
+  <label>Anticipation arret rotation - deg</label>
+  <input id="stopAdvance" type="number" value="8.0" step="1">
+
+  <h2 style="margin-top:18px">2. Cercle personnalise</h2>
   <label>Rayon cercle — cm</label>
   <input id="radius" type="number" value="5.0" step="0.1">
 
@@ -52,16 +63,17 @@ String html() {
     Pour un petit cercle, il faut démarrer tangent au cercle. Sinon le robot commence par faire une grande correction.
   </p>
 
-  <button class="btn-green" onclick="startCircle()">Lancer cercle</button>
+  <button class="btn-green" onclick="startCircle()">Lancer cercle suivi</button>
+  <button class="btn-purple" onclick="startSpinCustom()">Rotation sur place</button>
   <button class="btn-red" onclick="api('/api/s2/cercle/stop')">STOP cercle</button>
   <button class="btn-red" onclick="api('/api/stop')">STOP moteurs</button>
   <button class="btn-blue" onclick="api('/api/reset-encoders')">RESET odométrie</button>
 </section>
 
 <section class="card">
-  <h2>2. Réglages suivi</h2>
+  <h2>3. Reglages suivi</h2>
   <label>Échelle distance</label>
-  <input id="distanceScale" type="number" value="1.0" step="0.01">
+  <input id="distanceScale" type="number" value="0.93" step="0.01">
 
   <label>Vitesse stylo — cm/s</label>
   <input id="penSpeed" type="number" value="0.5" step="0.1">
@@ -83,22 +95,22 @@ String html() {
 </section>
 
 <section class="card">
-  <h2>3. PID</h2>
+  <h2>4. PID</h2>
   <label>Kp</label>
-  <input id="kp" type="number" value="8" step="0.1">
+  <input id="kp" type="number" value="0.04" step="0.01">
 
   <label>Ki</label>
   <input id="ki" type="number" value="0.00" step="0.01">
 
   <label>Kd</label>
-  <input id="kd" type="number" value="4" step="0.1">
+  <input id="kd" type="number" value="0.02" step="0.01">
 
   <label>Limite intégrale</label>
   <input id="iLimit" type="number" value="5" step="1">
 </section>
 
 <section class="card">
-  <h2>4. Moteurs</h2>
+  <h2>5. Moteurs</h2>
   <label>Autoriser recul</label>
   <select id="allowReverse">
     <option value="1">Oui</option>
@@ -109,7 +121,7 @@ String html() {
   <input id="wheelBase" type="number" value="8.3" step="0.1">
 
   <label>Offset stylo — cm</label>
-  <input id="penOffset" type="number" value="13.0" step="0.1">
+  <input id="penOffset" type="number" value="8.0" step="0.1">
 
   <label>Coef gauche cm/s/PWM</label>
   <input id="coefL" type="number" value="0.0709" step="0.001">
@@ -138,7 +150,7 @@ String html() {
 </section>
 
 <section class="card">
-  <h2>5. État robot</h2>
+  <h2>6. Etat robot</h2>
   <div class="value"><span>État</span><span id="state">---</span></div>
   <div class="value"><span>Mode</span><span id="mode">---</span></div>
   <div class="value"><span>PWM G/D</span><span id="pwm">---</span></div>
@@ -159,8 +171,41 @@ String html() {
 
 <script>
 function v(id){return document.getElementById(id).value;}
+function setValue(id,value){const el=document.getElementById(id);if(el)el.value=value;}
 function setText(id,value){const el=document.getElementById(id);if(el)el.textContent=value;}
 function fmt(x,d=2){return Number.isFinite(Number(x))?Number(x).toFixed(d):"---";}
+
+function setFollowProfile(radius){
+  setValue("radius", radius.toFixed(1));
+  setValue("segments", radius <= 5 ? 128 : 144);
+  setValue("startMode", "bottom");
+  setValue("initialHeadingMode", "tangent");
+  setValue("distanceScale", "0.93");
+  setValue("lookahead", radius <= 5 ? "0.25" : "0.35");
+  setValue("targetGain", "0.8");
+  setValue("lineGain", radius <= 5 ? "0.35" : "0.45");
+  setValue("penOffset", "8.0");
+  setValue("minPwm", "180");
+  setValue("pwmSlewStep", radius <= 5 ? "10" : "18");
+
+  if (radius <= 5) {
+    setValue("penSpeed", "1.0");
+    setValue("penSpeedMax", "2.5");
+    setValue("wheelSpeedMax", "5.0");
+    setValue("allowReverse", "1");
+    setValue("pwmDither", "1");
+    setValue("kp", "0.04");
+    setValue("kd", "0.02");
+  } else {
+    setValue("penSpeed", "4.0");
+    setValue("penSpeedMax", "8.0");
+    setValue("wheelSpeedMax", "12.0");
+    setValue("allowReverse", "0");
+    setValue("pwmDither", "1");
+    setValue("kp", "0.03");
+    setValue("kd", "0.015");
+  }
+}
 
 function appendCircleParams(params){
   params.append("radius", v("radius"));
@@ -198,6 +243,31 @@ async function startCircle(){
   appendCircleParams(params);
   await fetch("/api/s2/cercle/start-small?" + params.toString());
   await refreshLogs();
+}
+
+async function startCircle5(){
+  setFollowProfile(5.0);
+  await startCircle();
+}
+
+async function startCircle12(){
+  setFollowProfile(12.0);
+  await startCircle();
+}
+
+async function startSpinCustom(){
+  const params = new URLSearchParams();
+  params.append("radius", v("radius"));
+  params.append("clockwise", v("clockwise"));
+  params.append("pwm", v("spinPwm"));
+  params.append("stopAdvance", v("stopAdvance"));
+  await fetch("/api/s2/cercle/start-spin?" + params.toString());
+  await refreshLogs();
+}
+
+async function startSpin8(){
+  setValue("radius", "8.0");
+  await startSpinCustom();
 }
 
 async function api(route){

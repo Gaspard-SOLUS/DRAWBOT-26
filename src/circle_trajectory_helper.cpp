@@ -15,19 +15,20 @@ namespace CircleTrajectoryHelper {
       segments = TrajectoryGenerator::MAX_SEGMENTS;
     }
 
+    float radius = request.radiusCm * request.distanceScale;
     float centerX = 0.0f;
-    float centerY = request.radiusCm;
+    float centerY = radius;
     float startAngleDeg = -90.0f;
 
     if (request.startMode == StartMode::Right) {
-      centerX = -request.radiusCm;
+      centerX = -radius;
       centerY = 0.0f;
       startAngleDeg = 0.0f;
     }
 
     return TrajectoryGenerator::generateCircle(
       trajectory,
-      request.radiusCm,
+      radius,
       segments,
       centerX,
       centerY,

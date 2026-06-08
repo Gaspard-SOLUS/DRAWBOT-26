@@ -507,6 +507,12 @@ refreshLogs();
         <label>Distance 2 — cm</label>
         <input id="stairDist2" type="number" value="10" step="0.1">
 
+        <label>Compensation trait 2 - cm</label>
+        <input id="stairMiddleExtra" type="number" value="4.0" step="0.1">
+
+        <label>Correction angle 2 - deg</label>
+        <input id="stairAngleTrim" type="number" value="35.0" step="1">
+
         <label>Angle droite — degrés</label>
         <input id="stairAngleRight" type="number" value="90" step="1">
 
@@ -530,8 +536,11 @@ refreshLogs();
         <label>Distance axe roues → stylo — cm</label>
         <input id="penOffset" type="number" value="13.0" step="0.1">
 
+        <label>Echelle distance</label>
+        <input id="distanceScale" type="number" value="0.930" step="0.01">
+
         <label>Tolérance fin de segment — cm</label>
-        <input id="segTol" type="number" value="0.20" step="0.01">
+        <input id="segTol" type="number" value="0.08" step="0.01">
 
         <p>
           Le stylo est devant l'axe des roues. La commande calcule donc les vitesses
@@ -543,22 +552,22 @@ refreshLogs();
         <h2>4. Commande du stylo</h2>
 
         <label>Vitesse stylo — cm/s</label>
-        <input id="penSpeed" type="number" value="4.0" step="0.1">
+        <input id="penSpeed" type="number" value="13.0" step="0.1">
 
         <label>Gain retour vers ligne</label>
-        <input id="lineGain" type="number" value="1.5" step="0.1">
+        <input id="lineGain" type="number" value="0.45" step="0.05">
 
         <label>Gain attraction point cible</label>
         <input id="targetGain" type="number" value="0.8" step="0.1">
 
         <label>Lookahead — cm</label>
-        <input id="lookahead" type="number" value="2.0" step="0.1">
+        <input id="lookahead" type="number" value="0.35" step="0.05">
 
         <label>Vitesse stylo max — cm/s</label>
-        <input id="penSpeedMax" type="number" value="8.0" step="0.1">
+        <input id="penSpeedMax" type="number" value="18.0" step="0.1">
 
         <label>Vitesse roue max — cm/s</label>
-        <input id="wheelSpeedMax" type="number" value="10.0" step="0.1">
+        <input id="wheelSpeedMax" type="number" value="18.0" step="0.1">
       </section>
 
       <section class="card">
@@ -585,13 +594,16 @@ refreshLogs();
         <h2>6. Conversion vitesse → PWM</h2>
 
         <label>Coefficient moteur gauche — cm/s/PWM</label>
-        <input id="coefL" type="number" value="0.080" step="0.001">
+        <input id="coefL" type="number" value="0.0709" step="0.0001">
 
         <label>Coefficient moteur droit — cm/s/PWM</label>
-        <input id="coefR" type="number" value="0.080" step="0.001">
+        <input id="coefR" type="number" value="0.0686" step="0.0001">
 
         <label>PWM minimum</label>
-        <input id="minPwm" type="number" value="90" min="0" max="255" step="1">
+        <input id="minPwm" type="number" value="180" min="0" max="255" step="1">
+
+        <label>Rampe PWM / cycle</label>
+        <input id="pwmSlewStep" type="number" value="20" min="1" max="255" step="1">
 
         <p>
           Le PWM minimum sert à compenser les frottements : si une roue doit bouger,
@@ -658,6 +670,9 @@ refreshLogs();
   function appendFollowerConfig(params) {
     params.append("wheelBase", getValue("wheelBase"));
     params.append("penOffset", getValue("penOffset"));
+    params.append("distanceScale", getValue("distanceScale"));
+    params.append("stairMiddleExtra", getValue("stairMiddleExtra"));
+    params.append("stairAngleTrim", getValue("stairAngleTrim"));
 
     params.append("penSpeed", getValue("penSpeed"));
     params.append("lineGain", getValue("lineGain"));
@@ -675,6 +690,7 @@ refreshLogs();
     params.append("coefL", getValue("coefL"));
     params.append("coefR", getValue("coefR"));
     params.append("minPwm", getValue("minPwm"));
+    params.append("pwmSlewStep", getValue("pwmSlewStep"));
 
     params.append("segTol", getValue("segTol"));
   }
@@ -693,6 +709,9 @@ refreshLogs();
 
     document.getElementById("wheelBase").value = d.wheelBase;
     document.getElementById("penOffset").value = d.penOffset;
+    document.getElementById("distanceScale").value = d.distanceScale;
+    document.getElementById("stairMiddleExtra").value = d.stairMiddleExtra;
+    document.getElementById("stairAngleTrim").value = d.stairAngleTrim;
 
     document.getElementById("penSpeed").value = d.penSpeed;
     document.getElementById("lineGain").value = d.lineGain;
@@ -710,6 +729,7 @@ refreshLogs();
     document.getElementById("coefL").value = d.coefL;
     document.getElementById("coefR").value = d.coefR;
     document.getElementById("minPwm").value = d.minPwm;
+    document.getElementById("pwmSlewStep").value = d.pwmSlewStep;
 
     document.getElementById("segTol").value = d.segTol;
   }
