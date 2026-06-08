@@ -25,7 +25,12 @@ struct SensorState {
   float magY = 0.0f;
   float magZ = 0.0f;
 
+  float magRawX = 0.0f;
+  float magRawY = 0.0f;
+  float magRawZ = 0.0f;
+
   float headingMagDeg = 0.0f;
+  float magHeadingDeltaDeg = 0.0f;
 
   bool magCalibrationRunning = false;
   bool magCalibrationDone = false;
@@ -35,6 +40,14 @@ struct SensorState {
   float magOffsetY = 0.0f;
   float magScaleX = 1.0f;
   float magScaleY = 1.0f;
+
+  float magCalibrationRangeX = 0.0f;
+  float magCalibrationRangeY = 0.0f;
+
+  uint8_t magAddress = 0;
+  unsigned long magReadCount = 0;
+  unsigned long magLastReadMs = 0;
+  unsigned long magLastHeadingChangeMs = 0;
 };
 
 struct OdometryState {

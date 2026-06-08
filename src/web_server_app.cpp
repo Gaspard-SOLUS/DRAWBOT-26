@@ -221,6 +221,14 @@ static String penInverseStatusJson() {
 // API STATUS GLOBAL
 // ==================================================
 static void handleStatus() {
+  unsigned long now = millis();
+  long magReadAgeMs = sensorState.magReadCount > 0
+                    ? (long)(now - sensorState.magLastReadMs)
+                    : -1;
+  long magHeadingChangeAgeMs = sensorState.magLastHeadingChangeMs > 0
+                             ? (long)(now - sensorState.magLastHeadingChangeMs)
+                             : -1;
+
   String magCalibState = "NON";
   if (sensorState.magCalibrationRunning) magCalibState = "EN COURS";
   if (sensorState.magCalibrationDone) magCalibState = "OK";
@@ -231,7 +239,7 @@ static void handleStatus() {
   String json = "{";
 
   json += "\"ip\":\"" + WiFi.softAPIP().toString() + "\",";
-  json += "\"uptime\":" + String(millis() / 1000.0f, 2) + ",";
+  json += "\"uptime\":" + String(now / 1000.0f, 2) + ",";
   json += "\"state\":\"" + robotStateName() + "\",";
   json += "\"mode\":\"" + motorState.mode + "\",";
 
@@ -248,12 +256,22 @@ static void handleStatus() {
   json += "\"yawGyro\":" + String(sensorState.yawGyroDeg, 3) + ",";
 
   json += "\"magOk\":" + String(sensorState.magOk ? "true" : "false") + ",";
+  json += "\"magAddress\":\"0x" + String(sensorState.magAddress, HEX) + "\",";
+  json += "\"magReadCount\":" + String(sensorState.magReadCount) + ",";
+  json += "\"magReadAgeMs\":" + String(magReadAgeMs) + ",";
+  json += "\"magHeadingChangeAgeMs\":" + String(magHeadingChangeAgeMs) + ",";
+  json += "\"magHeadingDelta\":" + String(sensorState.magHeadingDeltaDeg, 3) + ",";
+  json += "\"magRawX\":" + String(sensorState.magRawX, 3) + ",";
+  json += "\"magRawY\":" + String(sensorState.magRawY, 3) + ",";
+  json += "\"magRawZ\":" + String(sensorState.magRawZ, 3) + ",";
   json += "\"magX\":" + String(sensorState.magX, 3) + ",";
   json += "\"magY\":" + String(sensorState.magY, 3) + ",";
   json += "\"magZ\":" + String(sensorState.magZ, 3) + ",";
   json += "\"headingMag\":" + String(sensorState.headingMagDeg, 3) + ",";
   json += "\"magCalib\":\"" + magCalibState + "\",";
   json += "\"magCalibrationLoaded\":" + String(sensorState.magCalibrationLoaded ? "true" : "false") + ",";
+  json += "\"magCalibrationRangeX\":" + String(sensorState.magCalibrationRangeX, 3) + ",";
+  json += "\"magCalibrationRangeY\":" + String(sensorState.magCalibrationRangeY, 3) + ",";
   json += "\"magOffsetX\":" + String(sensorState.magOffsetX, 4) + ",";
   json += "\"magOffsetY\":" + String(sensorState.magOffsetY, 4) + ",";
   json += "\"magScaleX\":" + String(sensorState.magScaleX, 4) + ",";
@@ -313,6 +331,7 @@ static void handleStatus() {
 
   json += "}";
 
+  server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", json);
 }
 
@@ -579,9 +598,6 @@ static CompassArrow::Config roseConfigFromRequest() {
 
   cfg.clockwise = parseBoolArg("clockwise", cfg.clockwise);
 
-  if (server.hasArg("tolerance")) cfg.alignToleranceDeg = server.arg("tolerance").toFloat();
-  if (server.hasArg("slowZone")) cfg.slowZoneDeg = server.arg("slowZone").toFloat();
-
   return cfg;
 }
 
@@ -598,6 +614,10 @@ static String roseStatusJson() {
   json += "\"heading\":" + String(st.headingDeg, 3) + ",";
   json += "\"northError\":" + String(st.northErrorDeg, 3) + ",";
   json += "\"inNorthWindow\":" + String(st.inNorthWindow ? "true" : "false") + ",";
+  json += "\"alignInitialHeading\":" + String(st.alignInitialHeadingDeg, 3) + ",";
+  json += "\"alignTargetDeg\":" + String(st.alignTargetDeg, 3) + ",";
+  json += "\"alignProgressDeg\":" + String(st.alignProgressDeg, 3) + ",";
+  json += "\"alignRemainingDeg\":" + String(st.alignRemainingDeg, 3) + ",";
   json += "\"pwmLeft\":" + String(st.pwmLeft) + ",";
   json += "\"pwmRight\":" + String(st.pwmRight) + ",";
   json += "\"trajectorySegments\":" + String(st.trajectorySegments);
@@ -607,6 +627,7 @@ static String roseStatusJson() {
 }
 
 static void handleS2RoseStatus() {
+  server.sendHeader("Cache-Control", "no-store");
   server.send(200, "application/json", roseStatusJson());
 }
 
@@ -619,6 +640,28 @@ static void handleS2RoseCalibrateStart() {
   }
 
   server.send(200, "text/plain", "S2_ROSE_CALIBRATION_START");
+}
+
+static void handleS2RoseAlignStart() {
+  CompassArrow::Config cfg = roseConfigFromRequest();
+
+  if (!CompassArrow::startAlignNorth(cfg)) {
+    server.send(400, "text/plain", "S2_ROSE_ALIGN_ERROR");
+    return;
+  }
+
+  server.send(200, "text/plain", "S2_ROSE_ALIGN_START");
+}
+
+static void handleS2RoseDrawStart() {
+  CompassArrow::Config cfg = roseConfigFromRequest();
+
+  if (!CompassArrow::startDrawOnly(cfg)) {
+    server.send(400, "text/plain", "S2_ROSE_DRAW_ERROR");
+    return;
+  }
+
+  server.send(200, "text/plain", "S2_ROSE_DRAW_START");
 }
 
 static void handleS2RoseStart() {
@@ -694,6 +737,8 @@ namespace WebApp {
     server.on("/api/s2/cercle/stop", handleS2CercleStop);
     server.on("/api/s2/rose/status", handleS2RoseStatus);
     server.on("/api/s2/rose/calibrate/start", handleS2RoseCalibrateStart);
+    server.on("/api/s2/rose/align/start", handleS2RoseAlignStart);
+    server.on("/api/s2/rose/draw/start", handleS2RoseDrawStart);
     server.on("/api/s2/rose/start", handleS2RoseStart);
     server.on("/api/s2/rose/stop", handleS2RoseStop);
 

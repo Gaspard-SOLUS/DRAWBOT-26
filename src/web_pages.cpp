@@ -945,8 +945,14 @@ refreshLogs();
         <button class="btn-red" onclick="api('/api/clear-mag-calibration')">Effacer calibration</button>
 
         <div class="value"><span>Magnetometre</span><span id="magOk">---</span></div>
+        <div class="value"><span>Adresse LIS3MDL</span><span id="magAddress">---</span></div>
+        <div class="value"><span>Lectures</span><span id="magReadCount">---</span></div>
+        <div class="value"><span>Derniere lecture</span><span id="magReadAge">---</span></div>
+        <div class="value"><span>Dernier changement cap</span><span id="magHeadingChangeAge">---</span></div>
         <div class="value"><span>Calibration</span><span id="magCalib">---</span></div>
         <div class="value"><span>Calibration chargee</span><span id="magCalibrationLoaded">---</span></div>
+        <div class="value"><span>Variation calib X/Y</span><span id="magCalibrationRange">---</span></div>
+        <div class="value"><span>Raw X/Y/Z</span><span id="magRaw">---</span></div>
         <div class="value"><span>Offset X</span><span id="magOffsetX">---</span></div>
         <div class="value"><span>Offset Y</span><span id="magOffsetY">---</span></div>
         <div class="value"><span>Scale X</span><span id="magScaleX">---</span></div>
@@ -963,8 +969,13 @@ refreshLogs();
           ---
         </div>
 
+        <div class="value"><span>Direction</span><span id="headingCardinal">---</span></div>
         <div class="value"><span>Erreur au Nord</span><span id="northError">---</span></div>
         <div class="value"><span>Fenetre Nord</span><span>358 deg a 3 deg</span></div>
+        <div class="value"><span>Cap initial utilise</span><span id="alignInitialHeading">---</span></div>
+        <div class="value"><span>Rotation calculee</span><span id="alignTargetDeg">---</span></div>
+        <div class="value"><span>Progression rotation</span><span id="alignProgressDeg">---</span></div>
+        <div class="value"><span>Reste a tourner</span><span id="alignRemainingDeg">---</span></div>
         <div class="value"><span>Phase</span><span id="rosePhase">---</span></div>
         <div class="value"><span>Message</span><span id="roseMessage">---</span></div>
         <div class="value"><span>PWM G/D</span><span id="rosePwm">---</span></div>
@@ -986,13 +997,14 @@ refreshLogs();
         <input id="drawSpeed" type="number" value="8.0" min="2" max="16" step="0.1">
 
         <label>PWM alignement Nord</label>
-        <input id="alignPwm" type="number" value="190" min="180" max="255" step="1">
+        <input id="alignPwm" type="number" value="180" min="180" max="255" step="1">
 
-        <label>Tolerance arret Nord - deg</label>
-        <input id="tolerance" type="number" value="1.0" min="0.5" max="5" step="0.1">
+        <div class="value"><span>Arret Nord</span><span>358 deg a 3 deg</span></div>
 
         <br><br>
-        <button class="btn-purple" onclick="startArrow()">Lancer fleche Nord</button>
+        <button class="btn-blue" onclick="startAlignNorth()">1. Tourner vers le Nord</button>
+        <button class="btn-purple" onclick="startDrawOnly()">2. Dessiner la fleche</button>
+        <button class="btn-purple" onclick="startArrow()">3. Nord puis fleche</button>
         <button class="btn-red" onclick="api('/api/s2/rose/stop')">STOP rose</button>
         <button class="btn-red" onclick="api('/api/stop')">STOP moteurs</button>
       </section>
@@ -1024,6 +1036,19 @@ refreshLogs();
     return Number(value).toFixed(digits);
   }
 
+  function directionName(deg) {
+    if (deg === null || deg === undefined || isNaN(deg)) return "---";
+    const h = ((Number(deg) % 360) + 360) % 360;
+    if (h >= 358 || h <= 3) return "Nord";
+    if (h < 87) return "Nord-Est";
+    if (h <= 93) return "Est";
+    if (h < 177) return "Sud-Est";
+    if (h <= 183) return "Sud";
+    if (h < 267) return "Sud-Ouest";
+    if (h <= 273) return "Ouest";
+    return "Nord-Ouest";
+  }
+
   function roseParams() {
     const params = new URLSearchParams();
     params.append("shaft", v("shaft"));
@@ -1033,7 +1058,6 @@ refreshLogs();
     params.append("alignPwm", v("alignPwm"));
     params.append("calibrationPwm", v("calibrationPwm"));
     params.append("clockwise", v("clockwise"));
-    params.append("tolerance", v("tolerance"));
     return params;
   }
 
@@ -1044,6 +1068,16 @@ refreshLogs();
 
   async function startCalibration() {
     await fetch("/api/s2/rose/calibrate/start?" + roseParams().toString());
+    await refreshAll();
+  }
+
+  async function startAlignNorth() {
+    await fetch("/api/s2/rose/align/start?" + roseParams().toString());
+    await refreshAll();
+  }
+
+  async function startDrawOnly() {
+    await fetch("/api/s2/rose/draw/start?" + roseParams().toString());
     await refreshAll();
   }
 
@@ -1063,10 +1097,11 @@ refreshLogs();
 
   async function refreshAll() {
     try {
-      const statusRes = await fetch("/api/status");
+      const stamp = Date.now();
+      const statusRes = await fetch("/api/status?t=" + stamp);
       const status = await statusRes.json();
 
-      const roseRes = await fetch("/api/s2/rose/status");
+      const roseRes = await fetch("/api/s2/rose/status?t=" + stamp);
       const rose = await roseRes.json();
 
       setText("state", status.state);
@@ -1077,15 +1112,26 @@ refreshLogs();
       setText("penY", fmt(status.penY, 2) + " cm");
 
       setText("magOk", status.magOk ? "OK" : "NON");
+      setText("magAddress", status.magAddress || "---");
+      setText("magReadCount", status.magReadCount);
+      setText("magReadAge", status.magReadAgeMs >= 0 ? status.magReadAgeMs + " ms" : "---");
+      setText("magHeadingChangeAge", status.magHeadingChangeAgeMs >= 0 ? status.magHeadingChangeAgeMs + " ms" : "---");
       setText("magCalib", status.magCalib);
       setText("magCalibrationLoaded", status.magCalibrationLoaded ? "OUI" : "NON");
+      setText("magCalibrationRange", fmt(status.magCalibrationRangeX, 2) + " / " + fmt(status.magCalibrationRangeY, 2) + " uT");
+      setText("magRaw", fmt(status.magRawX, 2) + " / " + fmt(status.magRawY, 2) + " / " + fmt(status.magRawZ, 2) + " uT");
       setText("magOffsetX", fmt(status.magOffsetX, 2));
       setText("magOffsetY", fmt(status.magOffsetY, 2));
       setText("magScaleX", fmt(status.magScaleX, 4));
       setText("magScaleY", fmt(status.magScaleY, 4));
 
       setText("headingMag", fmt(status.headingMag, 1) + " deg");
+      setText("headingCardinal", directionName(status.headingMag));
       setText("northError", fmt(rose.northError, 2) + " deg");
+      setText("alignInitialHeading", fmt(rose.alignInitialHeading, 1) + " deg");
+      setText("alignTargetDeg", fmt(rose.alignTargetDeg, 1) + " deg");
+      setText("alignProgressDeg", fmt(rose.alignProgressDeg, 1) + " deg");
+      setText("alignRemainingDeg", fmt(rose.alignRemainingDeg, 1) + " deg");
       setText("rosePhase", rose.phase);
       setText("roseMessage", rose.message || "---");
       setText("rosePwm", rose.pwmLeft + " / " + rose.pwmRight);

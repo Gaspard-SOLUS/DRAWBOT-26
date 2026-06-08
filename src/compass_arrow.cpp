@@ -7,6 +7,7 @@
 #include "moteurs.h"
 #include "odometry.h"
 #include "pen_inverse_follower.h"
+#include "robot.h"
 #include "sensors.h"
 #include "soutenance2.h"
 #include "trajectory_generator.h"
@@ -27,8 +28,20 @@ namespace {
   CompassArrow::Status status;
 
   unsigned long settleStartMs = 0;
+  unsigned long alignStartMs = 0;
+  float alignInitialHeadingDeg = 0.0f;
+  float alignTargetRad = 0.0f;
+  float alignTargetDeg = 0.0f;
+  float alignProgressDeg = 0.0f;
+  float alignRemainingDeg = 0.0f;
+  bool drawAfterAlignment = false;
   bool followerConfigSaved = false;
   PenInverseFollower::Config previousFollowerConfig;
+
+  const float ALIGN_ODOM_TOLERANCE_DEG = 3.0f;
+  const float ALIGN_MIN_TARGET_DEG = 1.0f;
+
+  bool startDrawing();
 
   const char* phaseName(Phase value) {
     switch (value) {
@@ -85,6 +98,16 @@ namespace {
     }
   }
 
+  void spinSigned(int pwm, float signedTurnRad, const String& mode) {
+    int commandPwm = safePwm(pwm);
+
+    if (signedTurnRad >= 0.0f) {
+      setRoseMotors(-commandPwm, commandPwm, mode);
+    } else {
+      setRoseMotors(commandPwm, -commandPwm, mode);
+    }
+  }
+
   void updateStatusBase() {
     status.running = phase == Phase::Calibrating ||
                      phase == Phase::Aligning ||
@@ -97,6 +120,17 @@ namespace {
     status.headingDeg = Sensors::normalizeAngleDeg(sensorState.headingMagDeg);
     status.northErrorDeg = CompassArrow::northErrorDeg(status.headingDeg);
     status.inNorthWindow = CompassArrow::isInNorthWindow(status.headingDeg);
+    status.alignInitialHeadingDeg = alignInitialHeadingDeg;
+    status.alignTargetDeg = alignTargetDeg;
+    if (phase == Phase::Aligning || phase == Phase::AlignSettling) {
+      float progressDeg = fabsf(odometryState.thetaRad) * 180.0f / PI;
+      float targetDeg = fabsf(alignTargetDeg);
+      alignProgressDeg = fminf(progressDeg, targetDeg);
+      alignRemainingDeg = fmaxf(0.0f, targetDeg - alignProgressDeg);
+    }
+
+    status.alignProgressDeg = alignProgressDeg;
+    status.alignRemainingDeg = alignRemainingDeg;
   }
 
   bool addMove(TrajectoryGenerator::Trajectory& trajectory, TrajectoryGenerator::Point& current, TrajectoryGenerator::Point next) {
@@ -127,37 +161,37 @@ namespace {
 
     TrajectoryGenerator::Point current {0.0f, 0.0f};
     TrajectoryGenerator::Point baseCenter {baseX, 0.0f};
-    TrajectoryGenerator::Point bottomBase {baseX, -halfBase};
+    TrajectoryGenerator::Point leftBase {baseX, halfBase};
     TrajectoryGenerator::Point tip {tipX, 0.0f};
-    TrajectoryGenerator::Point topBase {baseX, halfBase};
+    TrajectoryGenerator::Point rightBase {baseX, -halfBase};
 
-    // Trait principal puis contour du triangle.
+    // Trait principal, demi-base gauche, puis fermeture du triangle.
     if (!addMove(trajectory, current, baseCenter)) return false;
-    if (!addMove(trajectory, current, bottomBase)) return false;
+    if (!addMove(trajectory, current, leftBase)) return false;
     if (!addMove(trajectory, current, tip)) return false;
-    if (!addMove(trajectory, current, topBase)) return false;
-    if (!addMove(trajectory, current, bottomBase)) return false;
+    if (!addMove(trajectory, current, rightBase)) return false;
+    if (!addMove(trajectory, current, baseCenter)) return false;
 
-    bool goingUp = true;
-    float x = baseX;
+    bool leftToRight = true;
+    float x = baseX + fillStep;
 
     while (x <= tipX + 0.001f) {
       float t = (x - baseX) / headHeight;
       t = constrain(t, 0.0f, 1.0f);
 
       float halfWidth = halfBase * (1.0f - t);
-      TrajectoryGenerator::Point bottom {x, -halfWidth};
-      TrajectoryGenerator::Point top {x, halfWidth};
+      TrajectoryGenerator::Point left {x, halfWidth};
+      TrajectoryGenerator::Point right {x, -halfWidth};
 
-      if (goingUp) {
-        if (!addMove(trajectory, current, bottom)) return false;
-        if (!addMove(trajectory, current, top)) return false;
+      if (leftToRight) {
+        if (!addMove(trajectory, current, left)) return false;
+        if (!addMove(trajectory, current, right)) return false;
       } else {
-        if (!addMove(trajectory, current, top)) return false;
-        if (!addMove(trajectory, current, bottom)) return false;
+        if (!addMove(trajectory, current, right)) return false;
+        if (!addMove(trajectory, current, left)) return false;
       }
 
-      goingUp = !goingUp;
+      leftToRight = !leftToRight;
       x += fillStep;
     }
 
@@ -174,7 +208,107 @@ namespace {
     followerConfigSaved = false;
   }
 
+  bool magnetometerCanStart(const char* actionName) {
+    if (!sensorState.magOk) {
+      status.message = "LIS3MDL non detecte";
+      phase = Phase::Error;
+      Logger::log(String("Erreur fleche Nord ") + actionName + " : magnetometre non detecte");
+      return false;
+    }
+
+    unsigned long now = millis();
+    bool recentRead = sensorState.magReadCount > 0 &&
+                      sensorState.magLastReadMs > 0 &&
+                      now - sensorState.magLastReadMs <= 1000;
+
+    if (!recentRead) {
+      status.message = "Cap magnetique invalide";
+      phase = Phase::Error;
+      Logger::log(String("Erreur fleche Nord ") + actionName +
+                  " : lecture magnetometre absente ou trop ancienne");
+      return false;
+    }
+
+    if (sensorState.magCalibrationRunning) {
+      status.message = "Calibration magnetometre en cours";
+      Logger::log(String("Erreur fleche Nord ") + actionName + " : attendre la fin de calibration");
+      return false;
+    }
+
+    return true;
+  }
+
+  float signedTurnToNorthDeg(float headingDeg) {
+    float h = Sensors::normalizeAngleDeg(headingDeg);
+    if (CompassArrow::isInNorthWindow(h)) {
+      return 0.0f;
+    }
+
+    if (h <= 180.0f) {
+      return h;
+    }
+
+    return h - 360.0f;
+  }
+
+  bool startComputedNorthAlignment(bool drawAfter, const char* logName) {
+    if (!magnetometerCanStart(logName)) {
+      return false;
+    }
+
+    PenInverseFollower::stop();
+    Soutenance2::stop();
+    stopRoseMotors();
+    restoreFollowerConfigIfNeeded();
+
+    drawAfterAlignment = drawAfter;
+    alignInitialHeadingDeg = Sensors::normalizeAngleDeg(sensorState.headingMagDeg);
+    alignTargetDeg = signedTurnToNorthDeg(alignInitialHeadingDeg);
+    alignTargetRad = alignTargetDeg * PI / 180.0f;
+    alignProgressDeg = 0.0f;
+    alignRemainingDeg = fabs(alignTargetDeg);
+    alignStartMs = millis();
+
+    status.finished = false;
+    status.trajectorySegments = 0;
+
+    if (fabs(alignTargetDeg) <= ALIGN_MIN_TARGET_DEG) {
+      stopRoseMotors();
+      phase = Phase::Done;
+      status.message = "Cap initial deja dans la fenetre Nord";
+      updateStatusBase();
+      Logger::log(String("Alignement Nord non lance : cap initial=") +
+                  String(alignInitialHeadingDeg, 1) +
+                  " deg, cible=0 deg");
+
+      if (drawAfterAlignment) {
+        return startDrawing();
+      }
+
+      return true;
+    }
+
+    Odometry::resetPose(0.0f, 0.0f, 0.0f);
+
+    phase = Phase::Aligning;
+    status.message = drawAfter ? "Rotation calculee Nord puis dessin"
+                               : "Rotation calculee vers le Nord";
+    updateStatusBase();
+
+    Logger::log(String("Alignement Nord calcule : capInitial=") +
+                String(alignInitialHeadingDeg, 1) +
+                " deg rotation=" + String(alignTargetDeg, 1) +
+                " deg distanceRoue=" +
+                String(fabs(alignTargetRad) * RobotParams::WHEEL_BASE_CM * 0.5f, 2) +
+                " cm sens=" + String(alignTargetDeg >= 0.0f ? "gauche" : "droite") +
+                " pwm=" + String(cfg.alignPwm));
+
+    return true;
+  }
+
   bool startDrawing() {
+    stopRoseMotors();
+
     previousFollowerConfig = PenInverseFollower::getConfig();
     followerConfigSaved = true;
 
@@ -234,11 +368,8 @@ namespace {
     cfg.alignPwm = safePwm(cfg.alignPwm);
     cfg.calibrationPwm = safePwm(cfg.calibrationPwm);
 
-    cfg.alignToleranceDeg = constrain(cfg.alignToleranceDeg, 0.5f, 5.0f);
-    cfg.slowZoneDeg = constrain(cfg.slowZoneDeg, 2.0f, 45.0f);
     cfg.settleMs = constrain(cfg.settleMs, 50UL, 1500UL);
-    cfg.pulsePeriodMs = constrain(cfg.pulsePeriodMs, 80UL, 1000UL);
-    cfg.pulseOnMs = constrain(cfg.pulseOnMs, 20UL, cfg.pulsePeriodMs);
+    cfg.alignTimeoutMs = constrain(cfg.alignTimeoutMs, 3000UL, 60000UL);
   }
 }
 
@@ -246,6 +377,11 @@ namespace CompassArrow {
   void begin() {
     phase = Phase::Idle;
     cfg = Config();
+    alignInitialHeadingDeg = 0.0f;
+    alignTargetRad = 0.0f;
+    alignTargetDeg = 0.0f;
+    alignProgressDeg = 0.0f;
+    alignRemainingDeg = 0.0f;
     status = Status();
     updateStatusBase();
     Logger::log("Module fleche Nord pret");
@@ -282,7 +418,9 @@ namespace CompassArrow {
 
     PenInverseFollower::stop();
     Soutenance2::stop();
+    stopRoseMotors();
     restoreFollowerConfigIfNeeded();
+    drawAfterAlignment = false;
 
     Sensors::startMagCalibration();
     if (!sensorState.magCalibrationRunning) {
@@ -303,42 +441,52 @@ namespace CompassArrow {
     return true;
   }
 
-  bool startArrow(const Config& config) {
+  bool startAlignNorth(const Config& config) {
     applyConfig(config);
 
-    if (!sensorState.magOk) {
-      status.message = "LIS3MDL non detecte";
-      phase = Phase::Error;
-      Logger::log("Erreur fleche Nord : magnetometre non detecte");
-      return false;
-    }
+    return startComputedNorthAlignment(false, "alignement");
+  }
+
+  bool startDrawOnly(const Config& config) {
+    applyConfig(config);
 
     if (sensorState.magCalibrationRunning) {
       status.message = "Calibration magnetometre en cours";
-      Logger::log("Erreur fleche Nord : attendre la fin de calibration");
+      Logger::log("Erreur fleche Nord dessin : attendre la fin de calibration");
       return false;
     }
 
     PenInverseFollower::stop();
     Soutenance2::stop();
+    stopRoseMotors();
     restoreFollowerConfigIfNeeded();
+    drawAfterAlignment = false;
 
-    phase = Phase::Aligning;
-    status.finished = false;
-    status.trajectorySegments = 0;
-    status.message = "Alignement vers le Nord";
+    if (!isInNorthWindow(sensorState.headingMagDeg)) {
+      Logger::log("Attention fleche Nord : dessin lance alors que cap=" +
+                  String(sensorState.headingMagDeg, 1) +
+                  " deg, hors fenetre [358;3]");
+    }
 
-    Logger::log("Fleche Nord : alignement lance pwm=" + String(cfg.alignPwm) +
-                " tolerance=" + String(cfg.alignToleranceDeg, 1) +
-                " deg sens=" + String(cfg.clockwise ? "horaire" : "antihoraire"));
+    return startDrawing();
+  }
 
-    return true;
+  bool startArrow(const Config& config) {
+    applyConfig(config);
+
+    return startComputedNorthAlignment(true, "sequence complete");
   }
 
   void stop() {
     PenInverseFollower::stop();
     stopRoseMotors();
     restoreFollowerConfigIfNeeded();
+    drawAfterAlignment = false;
+    alignInitialHeadingDeg = 0.0f;
+    alignTargetRad = 0.0f;
+    alignTargetDeg = 0.0f;
+    alignProgressDeg = 0.0f;
+    alignRemainingDeg = 0.0f;
 
     phase = Phase::Idle;
     status = Status();
@@ -368,25 +516,38 @@ namespace CompassArrow {
     }
 
     if (phase == Phase::Aligning) {
-      if (status.northErrorDeg <= cfg.alignToleranceDeg) {
+      float progressRad = fabs(odometryState.thetaRad);
+      float targetRad = fabs(alignTargetRad);
+      float remainingRad = max(0.0f, targetRad - progressRad);
+      float remainingDeg = remainingRad * 180.0f / PI;
+
+      if (remainingDeg <= ALIGN_ODOM_TOLERANCE_DEG || progressRad >= targetRad) {
         stopRoseMotors();
         settleStartMs = now;
         phase = Phase::AlignSettling;
-        status.message = "Nord detecte, stabilisation";
+        status.message = "Rotation Nord calculee terminee";
+        Logger::log("Rotation Nord terminee par odometrie : cible=" +
+                    String(alignTargetDeg, 1) +
+                    " deg progression=" + String(progressRad * 180.0f / PI, 1) +
+                    " deg capInitial=" + String(alignInitialHeadingDeg, 1) +
+                    " deg");
         updateStatusBase();
         return;
       }
 
-      if (status.northErrorDeg <= cfg.slowZoneDeg) {
-        unsigned long t = now % cfg.pulsePeriodMs;
-        if (t < cfg.pulseOnMs) {
-          spinSameDirection(180, "ROSE_ALIGN");
-        } else {
-          stopRoseMotors();
-        }
-      } else {
-        spinSameDirection(cfg.alignPwm, "ROSE_ALIGN");
+      if (now - alignStartMs > cfg.alignTimeoutMs) {
+        stopRoseMotors();
+        phase = Phase::Error;
+        status.message = "Arret securite : rotation Nord non terminee";
+        Logger::log("Erreur alignement Nord : timeout cible=" +
+                    String(alignTargetDeg, 1) +
+                    " deg progression=" + String(progressRad * 180.0f / PI, 1) +
+                    " deg");
+        updateStatusBase();
+        return;
       }
+
+      spinSigned(cfg.alignPwm, alignTargetRad, "ROSE_ALIGN");
 
       updateStatusBase();
       return;
@@ -400,11 +561,12 @@ namespace CompassArrow {
         return;
       }
 
-      if (status.inNorthWindow) {
+      if (drawAfterAlignment) {
         startDrawing();
       } else {
-        phase = Phase::Aligning;
-        status.message = "Correction finale Nord";
+        phase = Phase::Done;
+        status.message = "Robot oriente vers le Nord par odometrie";
+        Logger::log("Rotation Nord terminee, robot au Nord calcule");
       }
 
       updateStatusBase();

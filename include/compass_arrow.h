@@ -8,16 +8,12 @@ namespace CompassArrow {
     float fillStepCm = 0.35f;
     float drawSpeedCms = 8.0f;
 
-    int alignPwm = 190;
+    int alignPwm = 180;
     int calibrationPwm = 190;
     bool clockwise = true;
 
-    float alignToleranceDeg = 1.0f;
-    float slowZoneDeg = 12.0f;
-
     unsigned long settleMs = 250;
-    unsigned long pulsePeriodMs = 220;
-    unsigned long pulseOnMs = 80;
+    unsigned long alignTimeoutMs = 15000;
   };
 
   struct Status {
@@ -33,6 +29,11 @@ namespace CompassArrow {
     float northErrorDeg = 0.0f;
     bool inNorthWindow = false;
 
+    float alignInitialHeadingDeg = 0.0f;
+    float alignTargetDeg = 0.0f;
+    float alignProgressDeg = 0.0f;
+    float alignRemainingDeg = 0.0f;
+
     int pwmLeft = 0;
     int pwmRight = 0;
     int trajectorySegments = 0;
@@ -42,6 +43,8 @@ namespace CompassArrow {
   void update(unsigned long now, float dt);
 
   bool startCalibration(const Config& config);
+  bool startAlignNorth(const Config& config);
+  bool startDrawOnly(const Config& config);
   bool startArrow(const Config& config);
   void stop();
 

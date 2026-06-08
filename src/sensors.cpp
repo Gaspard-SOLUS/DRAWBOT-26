@@ -44,6 +44,12 @@ static float magMaxX = -1e9;
 static float magMinY =  1e9;
 static float magMaxY = -1e9;
 
+static bool magHasReferenceHeading = false;
+static float magReferenceHeadingDeg = 0.0f;
+
+static const float MAG_HEADING_CHANGE_EPS_DEG = 0.6f;
+static const float MAG_CALIB_MIN_RANGE_UT = 5.0f;
+
 // ==================================================
 // GYROSCOPE INTEGRE
 // ==================================================
@@ -92,6 +98,15 @@ static int16_t readInt16(uint8_t address, uint8_t regLow) {
   }
 
   return (int16_t)((high << 8) | low);
+}
+
+static float angleDistanceDeg(float a, float b) {
+  float diff = fabs(Sensors::normalizeAngleDeg(a) - Sensors::normalizeAngleDeg(b));
+  if (diff > 180.0f) {
+    diff = 360.0f - diff;
+  }
+
+  return diff;
 }
 
 // ==================================================
@@ -234,7 +249,18 @@ static void updateGyroYaw(unsigned long now) {
 // MAGNETOMETRE LIS3MDL
 // ==================================================
 static void initMagnetometer() {
-  sensorState.magOk = lis3mdl.begin_I2C(0x1E);
+  static const uint8_t addresses[] = {0x1C, 0x1E};
+
+  sensorState.magOk = false;
+  sensorState.magAddress = 0;
+
+  for (uint8_t address : addresses) {
+    if (lis3mdl.begin_I2C(address, &Wire)) {
+      sensorState.magOk = true;
+      sensorState.magAddress = address;
+      break;
+    }
+  }
 
   if (!sensorState.magOk) {
     Logger::log("Erreur : LIS3MDL non detecte");
@@ -246,7 +272,8 @@ static void initMagnetometer() {
   lis3mdl.setDataRate(LIS3MDL_DATARATE_155_HZ);
   lis3mdl.setRange(LIS3MDL_RANGE_4_GAUSS);
 
-  Logger::log("LIS3MDL detecte et initialise");
+  Logger::log("LIS3MDL detecte et initialise a l'adresse 0x" +
+              String(sensorState.magAddress, HEX));
 
   loadMagCalibration();
 }
@@ -262,6 +289,13 @@ static void readMagnetometer() {
   float rawX = event.magnetic.x;
   float rawY = event.magnetic.y;
   float rawZ = event.magnetic.z;
+  unsigned long now = millis();
+
+  sensorState.magRawX = rawX;
+  sensorState.magRawY = rawY;
+  sensorState.magRawZ = rawZ;
+  sensorState.magReadCount++;
+  sensorState.magLastReadMs = now;
 
   if (sensorState.magCalibrationRunning) {
     if (rawX < magMinX) magMinX = rawX;
@@ -269,7 +303,22 @@ static void readMagnetometer() {
     if (rawY < magMinY) magMinY = rawY;
     if (rawY > magMaxY) magMaxY = rawY;
 
-    if (millis() - magCalibStart >= MAG_CALIB_DURATION_MS) {
+    sensorState.magCalibrationRangeX = magMaxX - magMinX;
+    sensorState.magCalibrationRangeY = magMaxY - magMinY;
+
+    if (now - magCalibStart >= MAG_CALIB_DURATION_MS) {
+      if (sensorState.magCalibrationRangeX < MAG_CALIB_MIN_RANGE_UT ||
+          sensorState.magCalibrationRangeY < MAG_CALIB_MIN_RANGE_UT) {
+        sensorState.magCalibrationRunning = false;
+        sensorState.magCalibrationDone = false;
+
+        Logger::log("Calibration magnetometre invalide : variation trop faible");
+        Logger::log("rangeX=" + String(sensorState.magCalibrationRangeX, 2) +
+                    " uT rangeY=" + String(sensorState.magCalibrationRangeY, 2) +
+                    " uT");
+        return;
+      }
+
       sensorState.magOffsetX = (magMaxX + magMinX) * 0.5f;
       sensorState.magOffsetY = (magMaxY + magMinY) * 0.5f;
 
@@ -304,6 +353,19 @@ static void readMagnetometer() {
 
   sensorState.headingMagDeg = atan2(-sensorState.magX, -sensorState.magY) * 180.0f / PI;
   sensorState.headingMagDeg = Sensors::normalizeAngleDeg(sensorState.headingMagDeg);
+
+  if (!magHasReferenceHeading) {
+    magHasReferenceHeading = true;
+    magReferenceHeadingDeg = sensorState.headingMagDeg;
+    sensorState.magLastHeadingChangeMs = now;
+    sensorState.magHeadingDeltaDeg = 0.0f;
+  } else {
+    sensorState.magHeadingDeltaDeg = angleDistanceDeg(sensorState.headingMagDeg, magReferenceHeadingDeg);
+    if (sensorState.magHeadingDeltaDeg >= MAG_HEADING_CHANGE_EPS_DEG) {
+      magReferenceHeadingDeg = sensorState.headingMagDeg;
+      sensorState.magLastHeadingChangeMs = now;
+    }
+  }
 }
 
 // ==================================================
@@ -352,6 +414,9 @@ namespace Sensors {
     magMaxX = -1e9;
     magMinY =  1e9;
     magMaxY = -1e9;
+
+    sensorState.magCalibrationRangeX = 0.0f;
+    sensorState.magCalibrationRangeY = 0.0f;
 
     Logger::log("Calibration magnetometre demarree pour 20 secondes");
     Logger::log("Tourner le robot a plat sur lui-meme pendant la calibration");
