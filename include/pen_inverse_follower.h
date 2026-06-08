@@ -78,6 +78,10 @@ namespace PenInverseFollower {
 
     // Compense le surplus observe sur le 2e angle de l'escalier.
     float stairSecondAngleTrimDeg = 35.0f;
+
+    // Evite les petites corrections visibles sur les segments droits de l'escalier.
+    float stairLineDeadbandCm = 0.25f;
+    float stairNormalSlewCms = 0.25f;
   };
 
   struct Status {

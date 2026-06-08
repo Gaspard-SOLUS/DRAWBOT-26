@@ -51,6 +51,8 @@ namespace {
     if (server().hasArg("segTol")) cfg.segmentToleranceCm = server().arg("segTol").toFloat();
     if (server().hasArg("stairMiddleExtra")) cfg.stairMiddleExtraCm = server().arg("stairMiddleExtra").toFloat();
     if (server().hasArg("stairAngleTrim")) cfg.stairSecondAngleTrimDeg = server().arg("stairAngleTrim").toFloat();
+    if (server().hasArg("stairLineDeadband")) cfg.stairLineDeadbandCm = server().arg("stairLineDeadband").toFloat();
+    if (server().hasArg("stairNormalSlew")) cfg.stairNormalSlewCms = server().arg("stairNormalSlew").toFloat();
 
     if (server().hasArg("cornerMode")) cfg.cornerMode = server().arg("cornerMode").toInt() != 0;
     if (server().hasArg("cornerApproach")) cfg.cornerApproachCm = server().arg("cornerApproach").toFloat();
@@ -97,6 +99,8 @@ namespace {
     json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3) + ",";
     json += "\"stairMiddleExtra\":" + String(cfg.stairMiddleExtraCm, 3) + ",";
     json += "\"stairAngleTrim\":" + String(cfg.stairSecondAngleTrimDeg, 3) + ",";
+    json += "\"stairLineDeadband\":" + String(cfg.stairLineDeadbandCm, 3) + ",";
+    json += "\"stairNormalSlew\":" + String(cfg.stairNormalSlewCms, 3) + ",";
 
     json += "\"cornerMode\":" + String(cfg.cornerMode ? "true" : "false") + ",";
     json += "\"cornerApproach\":" + String(cfg.cornerApproachCm, 3) + ",";

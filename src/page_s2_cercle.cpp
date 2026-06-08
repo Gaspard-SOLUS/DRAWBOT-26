@@ -17,22 +17,31 @@ String html() {
 </head>
 <body>
 <main>
-<h1>Soutenance 2 - Cercles 5 / 8 / 12 cm</h1>
-<p class="subtitle">Trois profils : petit cercle en avance/recul, cercle par rotation sur place, puis cercle plus grand par suivi du stylo.</p>
+<h1>Soutenance 2 - Cercles 5 / 13 / 16 cm</h1>
+<p class="subtitle">Trois profils : petit cercle piloté par distance roues, cercle par rotation sur place, puis cercle plus grand par suivi du stylo.</p>
 <p><a href="/soutenance2">← Retour soutenance 2</a></p>
 
 <div class="grid">
 <section class="card">
   <h2>1. Lancements rapides</h2>
-  <button class="btn-orange" onclick="startCircle5()">R=5 cm - avance / recul</button>
-  <button class="btn-purple" onclick="startSpin8()">R=8 cm - rotation sur place</button>
-  <button class="btn-green" onclick="startCircle12()">R=12 cm - suivi continu</button>
+  <button class="btn-orange" onclick="startCircle5()">R=5 cm - distance roues</button>
+  <button class="btn-purple" onclick="startSpin13()">R=13 cm - rotation sur place</button>
+  <button class="btn-green" onclick="startCircle16()">R=16 cm - suivi continu</button>
 
-  <label>PWM rotation R=8</label>
+  <label>PWM cercle R=5</label>
+  <input id="wheelCirclePwm" type="number" value="220" min="180" max="255" step="1">
+
+  <label>Echelle rayon R=5</label>
+  <input id="wheelRadiusScale" type="number" value="2.0" min="0.5" max="4.0" step="0.1">
+
+  <label>Arrondi debut/fin R=5 - deg</label>
+  <input id="wheelShapeLead" type="number" value="35.0" min="0" max="90" step="1">
+
+  <label>PWM rotation R=13</label>
   <input id="spinPwm" type="number" value="200" min="180" max="255" step="1">
 
   <label>Anticipation arret rotation - deg</label>
-  <input id="stopAdvance" type="number" value="8.0" step="1">
+  <input id="stopAdvance" type="number" value="35.0" step="1">
 
   <h2 style="margin-top:18px">2. Cercle personnalise</h2>
   <label>Rayon cercle — cm</label>
@@ -121,7 +130,7 @@ String html() {
   <input id="wheelBase" type="number" value="8.3" step="0.1">
 
   <label>Offset stylo — cm</label>
-  <input id="penOffset" type="number" value="8.0" step="0.1">
+  <input id="penOffset" type="number" value="13.0" step="0.1">
 
   <label>Coef gauche cm/s/PWM</label>
   <input id="coefL" type="number" value="0.0709" step="0.001">
@@ -184,7 +193,7 @@ function setFollowProfile(radius){
   setValue("lookahead", radius <= 5 ? "0.25" : "0.35");
   setValue("targetGain", "0.8");
   setValue("lineGain", radius <= 5 ? "0.35" : "0.45");
-  setValue("penOffset", "8.0");
+  setValue("penOffset", "13.0");
   setValue("minPwm", "180");
   setValue("pwmSlewStep", radius <= 5 ? "10" : "18");
 
@@ -197,11 +206,11 @@ function setFollowProfile(radius){
     setValue("kp", "0.04");
     setValue("kd", "0.02");
   } else {
-    setValue("penSpeed", "4.0");
-    setValue("penSpeedMax", "8.0");
-    setValue("wheelSpeedMax", "12.0");
+    setValue("penSpeed", "3.0");
+    setValue("penSpeedMax", "6.0");
+    setValue("wheelSpeedMax", "14.0");
     setValue("allowReverse", "0");
-    setValue("pwmDither", "1");
+    setValue("pwmDither", "0");
     setValue("kp", "0.03");
     setValue("kd", "0.015");
   }
@@ -247,11 +256,19 @@ async function startCircle(){
 
 async function startCircle5(){
   setFollowProfile(5.0);
-  await startCircle();
+  const params = new URLSearchParams();
+  params.append("radius", "5.0");
+  params.append("clockwise", v("clockwise"));
+  params.append("pwm", v("wheelCirclePwm"));
+  params.append("radiusScale", v("wheelRadiusScale"));
+  params.append("shapeLead", v("wheelShapeLead"));
+  appendCircleParams(params);
+  await fetch("/api/s2/cercle/start-wheel?" + params.toString());
+  await refreshLogs();
 }
 
-async function startCircle12(){
-  setFollowProfile(12.0);
+async function startCircle16(){
+  setFollowProfile(16.0);
   await startCircle();
 }
 
@@ -265,8 +282,8 @@ async function startSpinCustom(){
   await refreshLogs();
 }
 
-async function startSpin8(){
-  setValue("radius", "8.0");
+async function startSpin13(){
+  setValue("radius", "13.0");
   await startSpinCustom();
 }
 

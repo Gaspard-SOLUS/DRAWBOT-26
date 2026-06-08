@@ -45,6 +45,7 @@ namespace {
 
   float ditherAccumulatorLeft = 0.0f;
   float ditherAccumulatorRight = 0.0f;
+  float lastNormalCorrection = 0.0f;
 
   float clampFloat(float value, float minValue, float maxValue) {
     if (value < minValue) return minValue;
@@ -108,6 +109,10 @@ namespace {
     }
 
     return sign * absPwm;
+  }
+
+  int enforcePwmFloor(int pwm) {
+    return applyMinPwm(constrain(pwm, -255, 255));
   }
 
   int applySlew(int previous, int target) {
@@ -263,8 +268,8 @@ namespace {
   }
 
   void setMotorPwmTracked(int pwmLeft, int pwmRight) {
-    pwmLeft = constrain(pwmLeft, -255, 255);
-    pwmRight = constrain(pwmRight, -255, 255);
+    pwmLeft = enforcePwmFloor(pwmLeft);
+    pwmRight = enforcePwmFloor(pwmRight);
 
     motorState.pwmLeft = pwmLeft;
     motorState.pwmRight = pwmRight;
@@ -278,6 +283,7 @@ namespace {
     lastPwmRight = 0;
     ditherAccumulatorLeft = 0.0f;
     ditherAccumulatorRight = 0.0f;
+    lastNormalCorrection = 0.0f;
     status.pwmLeft = 0;
     status.pwmRight = 0;
     status.targetPwmLeft = 0;
@@ -319,6 +325,7 @@ namespace {
     lastPwmRight = 0;
     ditherAccumulatorLeft = 0.0f;
     ditherAccumulatorRight = 0.0f;
+    lastNormalCorrection = 0.0f;
 
     applyPidConfig();
     resetStatus();
@@ -370,6 +377,8 @@ namespace PenInverseFollower {
     if (cfg.segmentToleranceCm < 0.01f) cfg.segmentToleranceCm = 0.01f;
     cfg.stairMiddleExtraCm = clampFloat(cfg.stairMiddleExtraCm, 0.0f, 12.0f);
     cfg.stairSecondAngleTrimDeg = clampFloat(cfg.stairSecondAngleTrimDeg, 0.0f, 60.0f);
+    cfg.stairLineDeadbandCm = clampFloat(cfg.stairLineDeadbandCm, 0.0f, 2.0f);
+    cfg.stairNormalSlewCms = clampFloat(cfg.stairNormalSlewCms, 0.0f, 5.0f);
 
     applyPidConfig();
 
@@ -416,6 +425,8 @@ namespace PenInverseFollower {
       cfg.cornerMaxDurationS = prefs.getFloat("cornerDur", cfg.cornerMaxDurationS);
       cfg.stairMiddleExtraCm = prefs.getFloat("stairMidEx", cfg.stairMiddleExtraCm);
       cfg.stairSecondAngleTrimDeg = prefs.getFloat("stairAngTr", cfg.stairSecondAngleTrimDeg);
+      cfg.stairLineDeadbandCm = prefs.getFloat("stairDead", cfg.stairLineDeadbandCm);
+      cfg.stairNormalSlewCms = prefs.getFloat("stairNSlew", cfg.stairNormalSlewCms);
 
       cfg.kp = prefs.getFloat("kp", cfg.kp);
       cfg.ki = prefs.getFloat("ki", cfg.ki);
@@ -476,6 +487,8 @@ namespace PenInverseFollower {
     prefs.putFloat("cornerDur", cfg.cornerMaxDurationS);
     prefs.putFloat("stairMidEx", cfg.stairMiddleExtraCm);
     prefs.putFloat("stairAngTr", cfg.stairSecondAngleTrimDeg);
+    prefs.putFloat("stairDead", cfg.stairLineDeadbandCm);
+    prefs.putFloat("stairNSlew", cfg.stairNormalSlewCms);
 
     prefs.putFloat("kp", cfg.kp);
     prefs.putFloat("ki", cfg.ki);
@@ -666,6 +679,7 @@ namespace PenInverseFollower {
     if (length < 0.001f) {
       segmentIndex++;
       resetPid(pidLine);
+      lastNormalCorrection = 0.0f;
       return;
     }
 
@@ -698,6 +712,7 @@ namespace PenInverseFollower {
     if (progress >= length - endTolerance) {
       segmentIndex++;
       resetPid(pidLine);
+      lastNormalCorrection = 0.0f;
 
       if (segmentIndex >= segmentCount) {
         running = false;
@@ -731,14 +746,32 @@ namespace PenInverseFollower {
     float errorX = targetX - penX;
     float errorY = targetY - penY;
 
-    float pidNormal = updatePid(pidLine, lateralError, dt, cfg.integralLimit);
-    float normalCorrection = cfg.lineGain * lateralError + pidNormal;
+    bool stairLike = segmentCount <= 3 && !cfg.allowReverse;
+    float correctionError = lateralError;
+
+    if (stairLike && fabs(correctionError) < cfg.stairLineDeadbandCm) {
+      correctionError = 0.0f;
+      resetPid(pidLine);
+    }
+
+    float pidNormal = updatePid(pidLine, correctionError, dt, cfg.integralLimit);
+    float normalCorrection = cfg.lineGain * correctionError + pidNormal;
 
     status.normalCorrectionLimited = false;
     if (cfg.maxNormalCorrectionCms > 0.0f && fabs(normalCorrection) > cfg.maxNormalCorrectionCms) {
       normalCorrection = (normalCorrection > 0.0f) ? cfg.maxNormalCorrectionCms : -cfg.maxNormalCorrectionCms;
       status.normalCorrectionLimited = true;
     }
+
+    if (stairLike && cfg.stairNormalSlewCms > 0.0f) {
+      normalCorrection = clampFloat(
+        normalCorrection,
+        lastNormalCorrection - cfg.stairNormalSlewCms,
+        lastNormalCorrection + cfg.stairNormalSlewCms
+      );
+    }
+
+    lastNormalCorrection = normalCorrection;
 
     float vPenX = cfg.penSpeedCms * ux
                 + cfg.targetGain * errorX
@@ -794,7 +827,7 @@ namespace PenInverseFollower {
     int pwmLeftTarget = 0;
     int pwmRightTarget = 0;
 
-    if (!useDither && !cfg.allowReverse && segmentCount <= 3) {
+    if (!useDither && !cfg.allowReverse) {
       PwmPair pair = forwardOnlyPairForStair(pwmLeftRaw, pwmRightRaw);
       pwmLeftTarget = pair.left;
       pwmRightTarget = pair.right;
@@ -823,6 +856,9 @@ namespace PenInverseFollower {
     if (!useDither || !isSmallDitherCommand(pwmRightRaw)) {
       pwmRight = applyContinuousSlew(lastPwmRight, pwmRightTarget);
     }
+
+    pwmLeft = enforcePwmFloor(pwmLeft);
+    pwmRight = enforcePwmFloor(pwmRight);
 
     lastPwmLeft = pwmLeft;
     lastPwmRight = pwmRight;

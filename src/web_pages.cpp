@@ -582,6 +582,12 @@ refreshLogs();
         <label>Kd</label>
         <input id="kd" type="number" value="0.05" step="0.01">
 
+        <label>Deadband escalier - cm</label>
+        <input id="stairLineDeadband" type="number" value="0.25" step="0.01">
+
+        <label>Lissage correction escalier</label>
+        <input id="stairNormalSlew" type="number" value="0.25" step="0.01">
+
         <label>Limite intégrale</label>
         <input id="iLimit" type="number" value="10" step="1">
 
@@ -673,6 +679,8 @@ refreshLogs();
     params.append("distanceScale", getValue("distanceScale"));
     params.append("stairMiddleExtra", getValue("stairMiddleExtra"));
     params.append("stairAngleTrim", getValue("stairAngleTrim"));
+    params.append("stairLineDeadband", getValue("stairLineDeadband"));
+    params.append("stairNormalSlew", getValue("stairNormalSlew"));
 
     params.append("penSpeed", getValue("penSpeed"));
     params.append("lineGain", getValue("lineGain"));
@@ -712,6 +720,8 @@ refreshLogs();
     document.getElementById("distanceScale").value = d.distanceScale;
     document.getElementById("stairMiddleExtra").value = d.stairMiddleExtra;
     document.getElementById("stairAngleTrim").value = d.stairAngleTrim;
+    document.getElementById("stairLineDeadband").value = d.stairLineDeadband;
+    document.getElementById("stairNormalSlew").value = d.stairNormalSlew;
 
     document.getElementById("penSpeed").value = d.penSpeed;
     document.getElementById("lineGain").value = d.lineGain;

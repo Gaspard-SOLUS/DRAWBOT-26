@@ -126,6 +126,8 @@ static void applyPenInverseConfigFromRequest() {
   if (server.hasArg("segTol")) cfg.segmentToleranceCm = server.arg("segTol").toFloat();
   if (server.hasArg("stairMiddleExtra")) cfg.stairMiddleExtraCm = server.arg("stairMiddleExtra").toFloat();
   if (server.hasArg("stairAngleTrim")) cfg.stairSecondAngleTrimDeg = server.arg("stairAngleTrim").toFloat();
+  if (server.hasArg("stairLineDeadband")) cfg.stairLineDeadbandCm = server.arg("stairLineDeadband").toFloat();
+  if (server.hasArg("stairNormalSlew")) cfg.stairNormalSlewCms = server.arg("stairNormalSlew").toFloat();
 
   PenInverseFollower::setConfig(cfg);
 }
@@ -163,7 +165,9 @@ static String penInverseConfigJson() {
 
   json += "\"segTol\":" + String(cfg.segmentToleranceCm, 3) + ",";
   json += "\"stairMiddleExtra\":" + String(cfg.stairMiddleExtraCm, 3) + ",";
-  json += "\"stairAngleTrim\":" + String(cfg.stairSecondAngleTrimDeg, 3);
+  json += "\"stairAngleTrim\":" + String(cfg.stairSecondAngleTrimDeg, 3) + ",";
+  json += "\"stairLineDeadband\":" + String(cfg.stairLineDeadbandCm, 3) + ",";
+  json += "\"stairNormalSlew\":" + String(cfg.stairNormalSlewCms, 3);
 
   json += "}";
 
@@ -506,7 +510,7 @@ static void handleS2CercleStartSpin() {
   float radius = server.hasArg("radius") ? server.arg("radius").toFloat() : 8.0f;
   bool clockwise = parseBoolArg("clockwise", true);
   int pwm = server.hasArg("pwm") ? server.arg("pwm").toInt() : 200;
-  float stopAdvance = server.hasArg("stopAdvance") ? server.arg("stopAdvance").toFloat() : 8.0f;
+  float stopAdvance = server.hasArg("stopAdvance") ? server.arg("stopAdvance").toFloat() : 35.0f;
 
   if (!Soutenance2::startSpinCircle(radius, clockwise, pwm, stopAdvance)) {
     server.send(400, "text/plain", "S2_CIRCLE_SPIN_ERROR");
@@ -514,6 +518,26 @@ static void handleS2CercleStartSpin() {
   }
 
   server.send(200, "text/plain", "S2_CIRCLE_SPIN_START");
+}
+
+static void handleS2CercleStartWheel() {
+  Soutenance2::stop();
+  applyPenInverseConfigFromRequest();
+
+  PenInverseFollower::Config cfg = PenInverseFollower::getConfig();
+
+  float radius = server.hasArg("radius") ? server.arg("radius").toFloat() : 5.0f;
+  bool clockwise = parseBoolArg("clockwise", true);
+  int pwm = server.hasArg("pwm") ? server.arg("pwm").toInt() : 220;
+  float radiusScale = server.hasArg("radiusScale") ? server.arg("radiusScale").toFloat() : 2.0f;
+  float shapeLead = server.hasArg("shapeLead") ? server.arg("shapeLead").toFloat() : 35.0f;
+
+  if (!Soutenance2::startWheelDistanceCircle(radius, clockwise, pwm, cfg.penOffsetCm, cfg.wheelBaseCm, radiusScale, shapeLead)) {
+    server.send(400, "text/plain", "S2_CIRCLE_WHEEL_ERROR");
+    return;
+  }
+
+  server.send(200, "text/plain", "S2_CIRCLE_WHEEL_START");
 }
 
 static void handleS2CercleStop() {
@@ -587,6 +611,7 @@ namespace WebApp {
     server.on("/api/s2/cercle/start", handleS2CercleStart);
     server.on("/api/s2/cercle/start-small", handleS2CercleStartSmall);
     server.on("/api/s2/cercle/start-spin", handleS2CercleStartSpin);
+    server.on("/api/s2/cercle/start-wheel", handleS2CercleStartWheel);
     server.on("/api/s2/cercle/stop", handleS2CercleStop);
     server.on("/api/s2/rose/start", handleS2RoseStart);
 
