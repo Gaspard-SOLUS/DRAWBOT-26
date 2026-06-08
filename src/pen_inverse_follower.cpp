@@ -114,6 +114,24 @@ namespace {
     return target;
   }
 
+  int applyContinuousSlew(int previous, int target) {
+    target = applyMinPwm(target);
+
+    if (target == 0) {
+      return 0;
+    }
+
+    if (previous == 0) {
+      return target;
+    }
+
+    if ((previous > 0 && target < 0) || (previous < 0 && target > 0)) {
+      return target;
+    }
+
+    return applyMinPwm(applySlew(previous, target));
+  }
+
   int leftSpeedToRawPwm(float speedCms) {
     if (fabs(cfg.coefLeftCmsPerPwm) < 0.001f) return 0;
     return (int)round(speedCms / cfg.coefLeftCmsPerPwm);
@@ -417,6 +435,7 @@ namespace PenInverseFollower {
 
     copySegment(0, 0.0f, 0.0f, d, 0.0f);
 
+    Odometry::resetPose(-cfg.penOffsetCm, 0.0f, 0.0f);
     startSegments(1);
 
     Logger::log("Test ligne stylo : distance=" + String(distanceCm, 1) +
@@ -446,6 +465,7 @@ namespace PenInverseFollower {
     segments[0] = {p0, p1};
     segments[1] = {p1, p2};
 
+    Odometry::resetPose(-cfg.penOffsetCm, 0.0f, 0.0f);
     startSegments(2);
 
     Logger::log("Angle stylo lance : d1=" + String(d1Cm, 1) +
@@ -485,6 +505,7 @@ namespace PenInverseFollower {
     segments[1] = {p1, p2};
     segments[2] = {p2, p3};
 
+    Odometry::resetPose(-cfg.penOffsetCm, 0.0f, 0.0f);
     startSegments(3);
 
     Logger::log("Escalier stylo lance");
@@ -585,7 +606,13 @@ namespace PenInverseFollower {
       status.maxLateralErrorCm = fabs(lateralError);
     }
 
-    if (progress >= length - cfg.segmentToleranceCm) {
+    float endTolerance = cfg.segmentToleranceCm;
+
+    if (segmentIndex + 1 < segmentCount) {
+      endTolerance = fmin(endTolerance, 0.02f);
+    }
+
+    if (progress >= length - endTolerance) {
       segmentIndex++;
       resetPid(pidLine);
 
@@ -679,8 +706,17 @@ namespace PenInverseFollower {
     int pwmLeftRaw = leftSpeedToRawPwm(vLeftDesired);
     int pwmRightRaw = rightSpeedToRawPwm(vRightDesired);
 
-    int pwmLeftTarget = ditherPwmCommand(pwmLeftRaw, ditherAccumulatorLeft);
-    int pwmRightTarget = ditherPwmCommand(pwmRightRaw, ditherAccumulatorRight);
+    bool useDither = cfg.pwmDither && segmentCount > 3;
+
+    int pwmLeftTarget = useDither ? ditherPwmCommand(pwmLeftRaw, ditherAccumulatorLeft)
+                                  : applyMinPwm(pwmLeftRaw);
+    int pwmRightTarget = useDither ? ditherPwmCommand(pwmRightRaw, ditherAccumulatorRight)
+                                   : applyMinPwm(pwmRightRaw);
+
+    if (!useDither) {
+      ditherAccumulatorLeft = 0.0f;
+      ditherAccumulatorRight = 0.0f;
+    }
 
     int pwmLeft = pwmLeftTarget;
     int pwmRight = pwmRightTarget;
@@ -688,12 +724,12 @@ namespace PenInverseFollower {
     // Si on est en micro-impulsions, on ne rampe pas vers minPwm :
     // il faut vraiment envoyer une impulsion suffisante pour vaincre les frottements.
     // Pour les commandes au-dessus de minPwm, on garde la rampe classique.
-    if (!isSmallDitherCommand(pwmLeftRaw)) {
-      pwmLeft = applySlew(lastPwmLeft, pwmLeftTarget);
+    if (!useDither || !isSmallDitherCommand(pwmLeftRaw)) {
+      pwmLeft = applyContinuousSlew(lastPwmLeft, pwmLeftTarget);
     }
 
-    if (!isSmallDitherCommand(pwmRightRaw)) {
-      pwmRight = applySlew(lastPwmRight, pwmRightTarget);
+    if (!useDither || !isSmallDitherCommand(pwmRightRaw)) {
+      pwmRight = applyContinuousSlew(lastPwmRight, pwmRightTarget);
     }
 
     lastPwmLeft = pwmLeft;

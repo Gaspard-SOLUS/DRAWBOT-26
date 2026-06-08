@@ -55,8 +55,6 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  WebApp::handleClient();
-
   if (now - lastControlUpdate >= CONTROL_PERIOD_MS) {
     float dt = (now - lastControlUpdate) / 1000.0f;
     lastControlUpdate = now;
@@ -68,6 +66,7 @@ void loop() {
     MotorCalibration::update(now);
   }
 
+  WebApp::handleClient();
   Teleplot::update(now);
 
   if (now - lastLedToggle >= 500) {
